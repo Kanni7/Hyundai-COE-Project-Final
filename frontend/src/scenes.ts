@@ -17,6 +17,8 @@ export interface SceneConfig {
   height: number;
   /** Horizontal anchor (0..1): when the viewport crops the sides, this point keeps its place on screen. */
   focusX: number;
+  /** Columns [x0, x1] the default view fills the window width with (crops empty cabin at the sides). */
+  frame?: [number, number];
   /** Lowest image row that should stay above the voice dock; a short window gives up sky instead. */
   keepAboveDock?: number;
   /** Region [x0, y0, x1, y1] the camera leans into when the driver focuses on the screen. */
@@ -42,6 +44,8 @@ const NIGHT: SceneConfig = {
   width: 1933,
   height: 814,
   focusX: 0.74,
+  // From the left dash vent to the driver's door: the passenger door and window carry nothing to use.
+  frame: [620, 1933],
   focus: [985, 262, 1395, 480],
   screen: { quad: [[1022, 290], [1334, 293], [1331, 410], [1025, 406]], ui: { w: 1080, h: 404 }, radius: 18 },
   cluster: {

@@ -1,29 +1,26 @@
 import type { Intent } from '../types';
 
-export const SUGGESTIONS = [
-  'AC 20 pe kar do',
-  'Garmi lag rahi hai',
-  'Romantic gaane chalao',
-  'Music band kar do',
-  'Light gulabi kar do',
-  'Baarish ho rahi hai',
-  'Ghar le chalo',
-  'Sunroof kholo',
-  'Sport mode on karo',
-  'Seat thandi karo',
-  'Mummy ko call karo',
-  'Party mode on',
-  'Thak gaya hoon',
-  'एसी बाईस पर कर दो',
-  'Set temperature to 24',
-  'Gaadi start karo',
-  'Gear D mein daalo',
-  'Left indicator do',
-  'Andar ki light on karo',
-  'Darwaze lock karo',
-  'Sheesha saaf karo',
-  'Photo view',
-];
+const STARTERS = ['AC 20 pe kar do', 'Garmi lag rahi hai', 'Romantic gaane chalao', 'Ghar le chalo'];
+const ANSWERS = ['Haan', 'Nahi'];
+// Natural next steps after a command in each area (keyed by the intent type's prefix).
+const FOLLOW_UPS: Record<string, string[]> = {
+  climate: ['Thoda aur thanda karo', 'Fan speed badhao', 'AC band kar do'],
+  seat: ['Seat thandi karo', 'AC 22 pe kar do', 'Fan speed kam karo'],
+  media: ['Agla gaana lagao', 'Volume thoda badhao', 'Music band kar do'],
+  nav: ['Music chalao', 'Navigation band karo', 'Volume thoda kam karo'],
+  ambient: ['Light neeli kar do', 'Light ko music ke saath sync karo', 'Light band karo'],
+  mood: ['Light neeli kar do', 'Agla gaana lagao', 'Party mode on'],
+  phone: ['Call kaat do', 'Music chalao'],
+  gear: ['Sport mode on karo', 'Cruise 60 pe set karo', 'Right indicator do'],
+  ignition: ['AC 20 pe kar do', 'Gear D mein daalo', 'Music chalao'],
+};
+
+/** A few chips that fit the moment: answers to a yes/no question, follow-ups to the last command, or starters. */
+export function suggestionsFor(lastIntents: Intent[], awaitingAnswer: boolean): string[] {
+  if (awaitingAnswer) return ANSWERS;
+  const area = lastIntents[0]?.type.split('.')[0];
+  return (area && FOLLOW_UPS[area === 'drive' || area === 'cruise' ? 'gear' : area]) || STARTERS;
+}
 
 export function describeIntent(i: Intent): string {
   const { type, ...rest } = i;

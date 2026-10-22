@@ -8,6 +8,7 @@ import {
 import type { AmbientColor, AmbientMode, CarState, Intent, Mood, Page, Toast } from '../types';
 import { COLOR_LABEL, currentTrack, FAN_MAX, GENRE_LABEL, VOLUME_MAX } from '../state/car';
 import { AMBIENT_MODES, ambientColors, HUE_STEPS, hueCss } from '../lib/ambient';
+import { PROFILE_IDS, PROFILES } from '../lib/profiles';
 import { EqBars } from './EqBars';
 import { MapView } from './MapView';
 
@@ -40,6 +41,8 @@ export function Infotainment({ car, toast, voice, onIntent, width, height }: Pro
   const accent = car.ambient.on && !cycling ? ambientColors(car).css : '#3d8bff';
   const style = { width, height, '--accent': accent, fontSize: `${height / 25}px` } as CSSProperties;
   const go = (page: Page) => onIntent({ type: 'screen', page });
+  const [picking, setPicking] = useState(false);
+  const me = PROFILES[car.profile];
 
   return (
     <div className="ivi" style={style}>
@@ -54,6 +57,9 @@ export function Infotainment({ car, toast, voice, onIntent, width, height }: Pro
             {car.nav && !car.phone && <span className="pill"><Navigation /> {car.nav.destination} · {car.nav.minutes} min</span>}
             {car.media.playing && !car.nav && !car.phone && <span className="pill"><Music /> {car.media.radio ? `FM ${car.media.freq.toFixed(1)}` : currentTrack(car.media).title}</span>}
           </div>
+          <button className="ivi-profile" onClick={() => setPicking(true)} aria-label={`Driver profile: ${me.name}. Change profile`}>
+            <i style={{ background: me.accent }}>{me.name[0]}</i>{me.name}
+          </button>
           <div className="ivi-icons">
             {car.hazard && <TriangleAlert className="blink-red" />}
             {car.wipers !== 'off' && <CloudRain />}
@@ -61,6 +67,23 @@ export function Infotainment({ car, toast, voice, onIntent, width, height }: Pro
             <span>27°C</span>
           </div>
         </header>
+
+        {picking && (
+          <div className="ivi-profiles" role="dialog" aria-label="Choose driver profile" onClick={() => setPicking(false)}>
+            <small>Who's driving?</small>
+            <div>
+              {PROFILE_IDS.map((id) => {
+                const p = PROFILES[id];
+                return (
+                  <button key={id} className={id === car.profile ? 'on' : ''} style={{ '--pc': p.accent } as CSSProperties}
+                    onClick={() => { onIntent({ type: 'profile', id }); setPicking(false); }}>
+                    <i>{p.name[0]}</i><b>{p.name}</b><span>{p.heightCm} cm · {p.build}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <main className="ivi-body" key={car.screen}>
           {car.screen === 'home' && <HomePage car={car} onIntent={onIntent} go={go} />}

@@ -77,6 +77,47 @@ class LLMConfig:
 
 
 @dataclass
+class CommandLLMConfig:
+    """V2 fallback interpreter: fine-tuned Gemma 3 270M, 8-bit GGUF, run on the CPU by llama.cpp."""
+
+    model_path: Path = field(default_factory=lambda: _abs(_env("BD_CMD_LLM_PATH", "models/llm/cockpit-gemma-270m.q8_0.gguf")))
+    threads: int = field(default_factory=lambda: _env_int("BD_CMD_LLM_THREADS", 4))
+    # Room for MAX_COMMANDS commands; a longer answer is cut off and discarded.
+    max_tokens: int = field(default_factory=lambda: _env_int("BD_CMD_LLM_MAX_TOKENS", 160))
+
+
+@dataclass
+class BharatConfig:
+    """BharatConnect (driver <-> passenger voice translation): Whisper ASR, Cloud Translation, Cloud TTS."""
+
+    # Faster-Whisper size for ta/hi/en speech. "small" is bundled; "large-v3-turbo" is far better at Tamil
+    # (one-time download: set BD_ASR_LOCAL_ONLY=false for the first start).
+    asr_model: str = field(default_factory=lambda: _env("BD_BHARAT_ASR_MODEL", "small"))
+    max_audio_s: float = field(default_factory=lambda: _env_float("BD_BHARAT_MAX_AUDIO_S", 30.0))
+    # Google Cloud project for Cloud Translation v3; credentials come from GOOGLE_APPLICATION_CREDENTIALS.
+    project: str | None = field(default_factory=lambda: os.environ.get("GOOGLE_CLOUD_PROJECT") or None)
+    translate_timeout_s: float = field(default_factory=lambda: _env_float("BD_BHARAT_TRANSLATE_TIMEOUT_S", 8.0))
+    tts_timeout_s: float = field(default_factory=lambda: _env_float("BD_BHARAT_TTS_TIMEOUT_S", 10.0))
+
+
+@dataclass
+class SpeakerIDConfig:
+    """Driver recognition by voice: 3D-Speaker CAM++ embeddings (zh/en, sherpa-onnx), matched to enrolled profiles."""
+
+    model_path: Path = field(default_factory=lambda: _abs(_env("BD_SPEAKER_MODEL", "models/speaker/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx")))
+    # Voiceprints (embeddings only, no audio) of the enrolled profiles.
+    store_path: Path = field(default_factory=lambda: _abs(_env("BD_SPEAKER_STORE", "data/profiles/voiceprints.json")))
+    threads: int = field(default_factory=lambda: _env_int("BD_SPEAKER_THREADS", 2))
+    # Cosine similarity to accept the best voiceprint, and its lead over the runner-up.
+    threshold: float = field(default_factory=lambda: _env_float("BD_SPEAKER_THRESHOLD", 0.42))
+    margin: float = field(default_factory=lambda: _env_float("BD_SPEAKER_MARGIN", 0.05))
+    min_identify_s: float = field(default_factory=lambda: _env_float("BD_SPEAKER_MIN_S", 0.6))
+    min_enroll_s: float = field(default_factory=lambda: _env_float("BD_SPEAKER_MIN_ENROLL_S", 1.5))
+    max_samples: int = field(default_factory=lambda: _env_int("BD_SPEAKER_MAX_SAMPLES", 6))
+    min_rms: float = field(default_factory=lambda: _env_float("BD_SPEAKER_MIN_RMS", 0.005))
+
+
+@dataclass
 class VehicleLimits:
     temp_min_c: float = field(default_factory=lambda: _env_float("BD_TEMP_MIN_C", 16.0))
     temp_max_c: float = field(default_factory=lambda: _env_float("BD_TEMP_MAX_C", 30.0))
@@ -149,9 +190,14 @@ class AppConfig:
     asr: ASRConfig = field(default_factory=ASRConfig)
     sherpa: SherpaASRConfig = field(default_factory=SherpaASRConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    command_llm: CommandLLMConfig = field(default_factory=CommandLLMConfig)
+    bharat: BharatConfig = field(default_factory=BharatConfig)
+    speaker: SpeakerIDConfig = field(default_factory=SpeakerIDConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     limits: VehicleLimits = field(default_factory=VehicleLimits)
     context: ContextConfig = field(default_factory=ContextConfig)
+    # Keep inference on the fast cores of hybrid CPUs (see cpu.py); a no-op where all cores are alike.
+    pin_performance_cores: bool = field(default_factory=lambda: _env_bool("BD_PIN_PERFORMANCE_CORES", True))
     store_audio: bool = field(default_factory=lambda: _env_bool("BD_STORE_AUDIO", False))
     audio_store_dir: Path = field(default_factory=lambda: Path(_env("BD_AUDIO_STORE_DIR", "recordings")))
     api_host: str = field(default_factory=lambda: _env("BD_API_HOST", "127.0.0.1"))

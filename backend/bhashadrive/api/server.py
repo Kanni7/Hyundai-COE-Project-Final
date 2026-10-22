@@ -13,6 +13,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from ..audio.preprocessing import AudioError, decode_file
+from ..audio.speaker_id import PROFILE_IDS, SpeakerID
+from ..bharat.api import BharatServices, bharat_router
 from ..config import FRONTEND_DIST, AppConfig
 
 STATIC = Path(__file__).with_name("static")
@@ -28,8 +31,18 @@ class ConnectivityIn(BaseModel):
 
 
 def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = False, mock: bool = False,
-               frontend_dir: Path | None = FRONTEND_DIST) -> FastAPI:
+               frontend_dir: Path | None = FRONTEND_DIST, command_llm=None, bharat=None, speaker=None) -> FastAPI:
     config = config or AppConfig()
+    speaker = speaker or SpeakerID(config.speaker)  # model loads on first use
+    bharat = bharat or BharatServices.from_config(config.bharat)  # services load lazily: free until used
+    if command_llm is None and pipeline is None and not (mock or legacy):
+        try:
+            from ..nlu.command_llm import CommandLLM
+
+            command_llm = CommandLLM(config.command_llm)
+            print(f"[OK] Command LLM loaded: {command_llm.name}")
+        except Exception as e:  # optional fallback interpreter: the cockpit runs without it
+            print(f"[NOTE] Command LLM unavailable: {e}")
     if pipeline is None:
         if mock:
             from ..audio.asr import MockASR
@@ -74,7 +87,18 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
         nlu = pipeline.model.version if is_v2 else getattr(pipeline.parser, "name", "?")
         return {"nlu": nlu, "asr": getattr(pipeline.asr, "name", None),
                 "asr_ready": pipeline.asr is not None and getattr(pipeline.asr, "ready", True),
+                "llm": getattr(command_llm, "name", None), "llm_ready": command_llm is not None,
                 "vehicle": pipeline.vehicle.name, "mock": str(nlu).startswith("fake")}
+
+    @api.post("/interpret")
+    def interpret(body: TextIn):
+        """Fallback understanding: any sentence -> cockpit commands (frontend `Intent` JSON), by the command LLM."""
+        if command_llm is None:
+            raise HTTPException(503, "Command LLM not loaded")
+        with lock:
+            intents, seconds = command_llm.interpret(body.text)
+        print(f"[API /interpret] {seconds:.2f}s '{body.text}' -> {intents}")
+        return {"intents": intents, "latency_s": round(seconds, 3), "model": command_llm.name}
 
     @api.post("/text")
     def text(body: TextIn):
@@ -102,19 +126,66 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
         """Speech to text only. The cockpit routes the transcript itself (backend or local parser).
 
         `text` is the ASR output after phonetic retrieval and self-attention rescoring (the same text the
-        NLU sees); `asr_text` is the recogniser's own output, `asr_hypotheses` every decoding pass kept.
+        NLU sees); `hypotheses` every distinct refined decoding pass, `text` first, for a caller that can
+        judge them better (the classifier only knows its own domain); `asr_text` is the recogniser's own output.
         """
         asr = pipeline.asr
+        who = None
         with tempfile.TemporaryDirectory() as d:
             p, _ = await _upload(file, d)
             with lock:
                 res = asr.transcribe_file(p)
                 asr_text = res.text or ""
-                text = pipeline.refine_transcript(*(res.hypotheses or [asr_text])) if is_v2 and asr_text else asr_text
+                ranked = pipeline.rank_transcripts(*(res.hypotheses or [asr_text])) if is_v2 and asr_text else [asr_text]
+                if asr_text and speaker.ready and speaker.enrolled():
+                    try:
+                        who = speaker.identify(decode_file(p))
+                    except Exception as e:  # driver recognition is a bonus: never lose the command over it
+                        print(f"[API /transcribe] speaker ID failed: {e}")
+        text = ranked[0] if ranked else ""
         name = getattr(getattr(asr, "_local_asr", None) or asr, "name", None)
-        print(f"[API /transcribe] {name} {res.latency_s}s status={res.status} asr={res.hypotheses or [asr_text]} -> refined='{text}'")
-        return {"text": text, "asr_text": asr_text, "asr_hypotheses": res.hypotheses, "status": res.status,
-                "error": res.error, "engine": name}
+        print(f"[API /transcribe] {name} {res.latency_s}s status={res.status} asr={res.hypotheses or [asr_text]} -> refined={ranked}")
+        return {"text": text, "hypotheses": ranked, "asr_text": asr_text, "asr_hypotheses": res.hypotheses,
+                "status": res.status, "error": res.error, "engine": name, "speaker": who}
+
+    def _profile(profile: str) -> str:
+        if profile not in PROFILE_IDS:
+            raise HTTPException(404, f"Unknown profile: {profile}")
+        return profile
+
+    @api.get("/speaker")
+    def speaker_status():
+        """Driver recognition: whether the speaker model is installed and which profiles have a voiceprint."""
+        return {"ready": speaker.ready, "enrolled": speaker.enrolled()}
+
+    @api.post("/speaker/{profile}")
+    async def speaker_enroll(profile: str, file: UploadFile = File(...)):
+        """Add one spoken sentence to a profile's voiceprint. The audio is deleted right after; only the embedding is kept."""
+        _profile(profile)
+        if not speaker.ready:
+            raise HTTPException(503, "Speaker model not installed")
+        data = await file.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "Audio too large")
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / f"enroll{Path(file.filename or 'a.webm').suffix or '.webm'}"
+            p.write_bytes(data)
+            try:
+                audio = decode_file(p)
+            except AudioError:
+                raise HTTPException(400, "Could not read the recording")
+        try:
+            with lock:
+                samples = speaker.enroll(profile, audio)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"profile": profile, "samples": samples}
+
+    @api.delete("/speaker/{profile}")
+    def speaker_forget(profile: str):
+        with lock:
+            speaker.forget(_profile(profile))
+        return {"profile": profile, "samples": 0}
 
     @api.post("/audio")
     async def audio(file: UploadFile = File(...)):
@@ -173,6 +244,7 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
             pipeline.vehicle.reset()
         return {"ok": True}
 
+    api.include_router(bharat_router(bharat))
     app.include_router(api)
     app.include_router(api, prefix="/api")
     if frontend_dir is not None and (frontend_dir / "index.html").is_file():
@@ -189,4 +261,10 @@ def run(config: AppConfig | None = None, host: str | None = None, port: int | No
     import uvicorn
 
     config = config or AppConfig()
+    if config.pin_performance_cores:
+        from ..cpu import pin_to_performance_cores
+
+        cpus = pin_to_performance_cores()
+        if cpus:
+            print(f"[OK] Inference pinned to performance cores {cpus}")
     uvicorn.run(create_app(config, legacy=legacy, mock=mock), host=host or config.api_host, port=port or config.api_port)

@@ -9,6 +9,9 @@ numpy==2.5.4
 soundfile==0.14.0
 av                           # decodes browser recordings (webm/ogg/mp4) for server speech recognition
 onnxruntime==1.31.0          # server speech recognition: hi-hinglish Whisper ONNX export (primary)
+llama-cpp-python==0.3.19       # command LLM runtime (CPU wheels: --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu)
+google-cloud-translate==3.28.0    # BharatConnect: Cloud Translation v3 (credentials via GOOGLE_APPLICATION_CREDENTIALS)
+google-cloud-texttospeech==2.38.0 # BharatConnect: spoken translations (ta-IN, hi-IN, en-IN)
 faster-whisper==1.2.1        # server speech recognition: Whisper small (fallback if the Hinglish model cannot load)
 ctranslate2==4.8.3
 huggingface_hub              # one-time model download (see README.md)

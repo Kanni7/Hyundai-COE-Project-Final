@@ -122,10 +122,18 @@ class BhashaDrivePipelineV2:
         Given several ASR hypotheses of one utterance, each is refined and the command model keeps the
         one it fits best (ties keep the earliest, i.e. the primary decoding language).
         """
+        ranked = self.rank_transcripts(*hypotheses)
+        return ranked[0] if ranked else ""
+
+    def rank_transcripts(self, *hypotheses: str) -> list[str]:
+        """The distinct refined hypotheses, best fit for the command model first (stable on ties). The
+        classifier only knows its own domain, so callers that understand more (the cockpit's parser) may
+        choose among them."""
         refined = list(dict.fromkeys(r for r in map(self._refine_one, hypotheses) if r))
         if len(refined) > 1 and self.rescorer is not None:
-            return max(refined, key=self.rescorer.fitness)
-        return refined[0] if refined else ""
+            fit = {r: self.rescorer.fitness(r) for r in refined}
+            refined.sort(key=lambda r: -fit[r])
+        return refined
 
     def _refine_one(self, text: str) -> str:
         norm = normalize_transcript(text)[:MAX_TEXT_CHARS]

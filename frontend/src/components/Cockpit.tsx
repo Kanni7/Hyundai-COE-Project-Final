@@ -19,18 +19,28 @@ interface Props {
   toast: Toast | null;
   voice: { phase: VoicePhase; interim: string; reply: string };
   onIntent: (i: Intent) => void;
-  reserveBottom: number;
-  focused: boolean;
+  /** cabin = whole interior, dash = dashboard and wheel, screen = lean in to the centre screen. */
+  view: CockpitView;
+  /** Double-clicking the screen leans in to it, or back out. */
   onToggleFocus: () => void;
   onMic: () => void;
 }
 
+/** 'seats' shows the cabin behind the seat side view (SeatView). */
+export type CockpitView = 'cabin' | 'dash' | 'screen' | 'seats';
+
 const COMPARE = new URLSearchParams(window.location.search).get('compare');
 /**
- * Zoom limit, as a multiple of the width fit. A tall window gets dark floor under
- * the cabin rather than a dashboard cropped down to the steering wheel.
+ * Zoom limit, as a multiple of the width fit. With the assistant in its side column nothing covers the
+ * bottom, so the cabin may crop its sides (the passenger door goes first) to fill a 16:10 window; with the
+ * bottom strip, a tall window keeps some dark floor under the cabin (the strip covers it) rather than a
+ * dashboard cropped down to the steering wheel.
  */
-const MAX_ZOOM = 1.12;
+const MAX_ZOOM = { side: 1.5, bottom: 1.12 };
+/** Voice assistant layout, kept in step with `.dock` in index.css. */
+const DOCK_SIDE_MIN_WIDTH = 900;
+const DOCK_SIDE_WIDTH = 460;
+const DOCK_BOTTOM_HEIGHT = 128;
 const poly = (pts: XY[]) => `polygon(${pts.map(([x, y]) => `${x}px ${y}px`).join(',')})`;
 const at = ([x, y]: XY, extra?: CSSProperties): CSSProperties => ({ left: x, top: y, ...extra });
 
@@ -44,29 +54,38 @@ function useViewport() {
   return vp;
 }
 
-export function Cockpit({ car, scene, toast, voice, onIntent, reserveBottom, focused, onToggleFocus, onMic }: Props) {
+export function Cockpit({ car, scene, toast, voice, onIntent, view, onToggleFocus, onMic }: Props) {
   const vp = useViewport();
+  // Space the voice assistant takes (mirrors `.dock` in index.css): a column over the empty passenger
+  // side of a wide window, a strip along the bottom of a narrow one.
+  const side = vp.w > DOCK_SIDE_MIN_WIDTH;
+  const reserveLeft = side ? DOCK_SIDE_WIDTH : 0;
+  const reserveBottom = side ? 0 : DOCK_BOTTOM_HEIGHT;
 
-  // Fill the width and, within MAX_ZOOM, the height above the dock. Any side crop is taken
-  // around scene.focusX, so that point (the steering wheel) keeps its place on screen.
-  const fit = vp.w / scene.width;
-  let s = Math.min(Math.max(fit, (vp.h - reserveBottom) / scene.height), fit * MAX_ZOOM);
+  // Fill the width (in the dashboard view, only the scene's frame columns) and, within MAX_ZOOM, the height
+  // above the dock. Any further side crop is taken around scene.focusX, so that point (the steering wheel) keeps its place.
+  const [x0, x1] = (view === 'dash' && scene.frame) || [0, scene.width];
+  const fit = vp.w / (x1 - x0);
+  let s = Math.min(Math.max(fit, (vp.h - reserveBottom) / scene.height), fit * MAX_ZOOM[side ? 'side' : 'bottom']);
   let sw = scene.width * s;
   let sh = scene.height * s;
-  let left = sw > vp.w ? -(sw - vp.w) * scene.focusX : (vp.w - sw) / 2;
+  const fx = (scene.focusX * scene.width - x0) / (x1 - x0);
+  let left = -x0 * s - ((x1 - x0) * s - vp.w) * fx;
+  left = sw > vp.w ? Math.min(0, Math.max(vp.w - sw, left)) : (vp.w - sw) / 2;
   let top = sh > vp.h ? -(sh - vp.h) * 0.4 : 0;
   // In a short window, lift the cabin (losing some sky, at most 12%) so the console clears the dock.
   if (scene.keepAboveDock) top = Math.min(top, Math.max(vp.h - reserveBottom - scene.keepAboveDock * s, -sh * 0.12));
   const cabinBottom = Math.min(vp.h, top + sh);
-  if (focused) {
-    // Lean in towards the centre stack, like a driver glancing at the screen.
-    const [x0, y0, x1, y1] = scene.focus;
+  if (view === 'screen') {
+    // Lean in towards the centre stack, like a driver glancing at the screen, centred beside the assistant.
+    const [fx0, fy0, fx1, fy1] = scene.focus;
     const room = vp.h - reserveBottom - 90;
-    s = Math.min((vp.w * 0.9) / (x1 - x0), room / (y1 - y0));
+    const free = vp.w - reserveLeft;
+    s = Math.min((free * 0.9) / (fx1 - fx0), room / (fy1 - fy0));
     sw = scene.width * s;
     sh = scene.height * s;
-    left = vp.w / 2 - ((x0 + x1) / 2) * s;
-    top = 70 + room / 2 - ((y0 + y1) / 2) * s;
+    left = reserveLeft + free / 2 - ((fx0 + fx1) / 2) * s;
+    top = 70 + room / 2 - ((fy0 + fy1) / 2) * s;
   }
 
   const screenTransform = useMemo(() => quadToMatrix3d(scene.screen.ui.w, scene.screen.ui.h, scene.screen.quad), [scene]);
@@ -84,7 +103,7 @@ export function Cockpit({ car, scene, toast, voice, onIntent, reserveBottom, foc
 
   return (
     <div className="viewport">
-      <div className={`stage ${focused ? 'focused' : ''}`} key={scene.id}
+      <div className={`stage ${view === 'screen' ? 'focused' : ''}`} key={scene.id}
         style={{ width: scene.width, height: scene.height, transform: `translate(${left}px, ${top}px) scale(${s})` }}>
         <div className="cabin" style={{ width: scene.width, height: scene.height }}>
           <img className="layer" src={scene.src} alt="Hyundai Verna interior" draggable={false} />
@@ -139,7 +158,7 @@ export function Cockpit({ car, scene, toast, voice, onIntent, reserveBottom, foc
           )}
         </div>
       </div>
-      <div className="viewport-fade" style={{ top: cabinBottom - 160, opacity: focused ? 0 : 1 }} />
+      <div className="viewport-fade" style={{ top: cabinBottom - 160, opacity: view === 'screen' ? 0 : 1 }} />
     </div>
   );
 }

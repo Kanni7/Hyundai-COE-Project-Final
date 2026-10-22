@@ -96,8 +96,17 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
 
 /** Speaks a reply with an Indian-English voice when available (it reads Hinglish naturally). */
 export function speak(text: string, onStart?: () => void, onEnd?: () => void) {
-  if (!('speechSynthesis' in window)) return;
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    onEnd?.();
+    return;
+  }
   window.speechSynthesis.cancel();
+  if (window.speechSynthesis.paused) {
+    try { window.speechSynthesis.resume(); } catch { /* ignore */ }
+  }
+  if (voices.length === 0) {
+    try { voices = window.speechSynthesis.getVoices(); } catch { /* ignore */ }
+  }
   const u = new SpeechSynthesisUtterance(text.replace(/°C/g, ' degrees'));
   const voice =
     voices.find((v) => v.lang === 'en-IN' && /female|heera|neerja|veena|google/i.test(v.name)) ??
@@ -105,10 +114,26 @@ export function speak(text: string, onStart?: () => void, onEnd?: () => void) {
     voices.find((v) => v.lang.startsWith('en'));
   if (voice) u.voice = voice;
   u.lang = voice?.lang ?? 'en-IN';
-  u.rate = 1.02;
-  u.pitch = 1.05;
+  u.rate = 1.0;
+  u.pitch = 1.02;
+  let done = false;
+  const finish = () => {
+    if (!done) {
+      done = true;
+      onEnd?.();
+    }
+  };
   u.onstart = () => onStart?.();
-  u.onend = () => onEnd?.();
-  u.onerror = () => onEnd?.();
-  window.speechSynthesis.speak(u);
+  u.onend = () => finish();
+  u.onerror = () => finish();
+  
+  // 50ms tick bypasses the Chromium cancel()->speak() race condition
+  window.setTimeout(() => {
+    try {
+      window.speechSynthesis.resume();
+      window.speechSynthesis.speak(u);
+    } catch {
+      finish();
+    }
+  }, 50);
 }

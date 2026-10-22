@@ -8,6 +8,9 @@ sounddevice==0.5.6
 psutil==7.2.2
 python-dotenv==1.2.4
 rapidfuzz==3.14.6            # phonetic candidate retrieval (post-ASR rescorer, domain snapping)
+llama-cpp-python==0.3.19       # command LLM runtime (CPU wheels: --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu)
+google-cloud-translate==3.28.0    # BharatConnect: Cloud Translation v3 (credentials via GOOGLE_APPLICATION_CREDENTIALS)
+google-cloud-texttospeech==2.38.0 # BharatConnect: spoken translations (ta-IN, hi-IN, en-IN)
 huggingface_hub              # one-time model download only (scripts/download_models.py)
 # Local API / test page
 fastapi==0.143.3

@@ -1,19 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Layers, Maximize, MessageSquareText, Play, Square, ZoomIn, ZoomOut } from 'lucide-react';
-import type { CarState, ChatMessage, Intent, Toast } from './types';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Armchair, Car, ChevronDown, Fingerprint, Gauge, Languages, Monitor, Play, Square } from 'lucide-react';
+import type { CarState, ChatMessage, Intent, ProfileId, Toast } from './types';
 import { SCENES } from './scenes';
-import { initialCar, runIntents } from './state/car';
+import { getTimeGreeting, initialCar, runIntents } from './state/car';
 import { parseCommand, type NluContext, type ParseResult } from './nlu/parser';
 import { carAudio } from './lib/audio';
 import { engine } from './lib/engine';
 import { speak, useSpeechRecognition } from './lib/speech';
-import { BACKEND_DOMAIN, backend, recordAudio, toIntent, type BackendHealth } from './lib/backend';
-import { Cockpit } from './components/Cockpit';
+import { BACKEND_DOMAIN, backend, recordAudio, toIntent, type BackendHealth, type SpeakerStatus, type Transcription } from './lib/backend';
+import { suggestionsFor } from './lib/intents';
+import { Cockpit, type CockpitView } from './components/Cockpit';
 import type { VoicePhase } from './components/Infotainment';
 import { VoiceDock } from './components/VoiceDock';
+import { SettingsMenu } from './components/SettingsMenu';
+import { BharatConnect } from './components/BharatConnect';
 import { Transcript } from './components/Transcript';
+import { SeatView } from './components/SeatView';
+import { PROFILE_IDS, PROFILES } from './lib/profiles';
 
-const DOCK_HEIGHT = 128;
+const VIEWS = [['cabin', 'Cabin', Car], ['dash', 'Dashboard', Gauge], ['screen', 'Screen', Monitor], ['seats', 'Seats', Armchair]] as const;
+const NEXT_VIEW = { cabin: 'dash', dash: 'screen', screen: 'seats', seats: 'cabin' } as const;
 const THINK_MS = 420;
 
 const NEXT_SCENE = { live: 'night', night: 'day', day: 'live' } as const;
@@ -44,7 +50,7 @@ interface Routed {
   intents: Intent[];
   /** Backend reply for turns that change nothing (questions, refusals, saved shortcuts). */
   say?: string;
-  engine: 'backend' | 'local';
+  engine: 'backend' | 'local' | 'llm';
   awaitingConfirm?: boolean;
 }
 
@@ -57,31 +63,68 @@ function agrees(local: Intent, remote: Intent) {
 }
 
 /**
- * Compound commands and anything outside the backend's whitelist (lights, gears, windows,
- * questions...) stay on the local parser. Single climate / media / navigation commands, and
- * anything the local parser missed (confirmations, personal shortcuts), go to the backend,
- * which also blocks negated requests ("AC band mat karo").
+ * Fast path first, command LLM for the rest. Clear commands take milliseconds:
+ *  - the local parser understood every clause, and the commands lie outside the classifier's whitelist
+ *    (compound commands, lights, gears, windows, questions...), or
+ *  - the backend classifier acts with calibrated confidence (and agrees with the parser, if it read it).
+ * The command LLM gets what neither can read with confidence: a clause the parser could not read, the
+ * classifier unsure or calling it unsupported, or parser and classifier disagreeing. Its answer can hold
+ * several commands. The backend's own questions (confirm an implicit request, ambiguous request, dialog
+ * turns) and its refusals of negated requests ("AC band mat karo") stand as they are.
  */
 // The local parser ignores negation, so a negated command must never reach it.
 const NEGATION = /\b(?:don'?t|do not|never|mat|na karo|nahi?n? (?:karo|karna|chahiye))\b|मत|ना करो|नहीं करना/i;
 
-async function route(text: string, parsed: ParseResult, online: boolean): Promise<Routed> {
+/**
+ * Which transcript to act on. The backend ranks its decoding passes with a classifier that knows only
+ * climate, media, volume and navigation, so the parser judges them: a reading it understands completely
+ * beats a partial one, and among those the reading most passes agree on wins (the passes err
+ * independently: "gula bika" -> light on, "gulaabi" -> pink, "gulaabhi" -> pink). Ties keep the backend's order.
+ */
+function bestTranscript(t: Transcription, ctx: NluContext): string {
+  const hyps = t.hypotheses?.length ? t.hypotheses : [t.text];
+  const read = hyps.map((h) => { const p = parseCommand(h, ctx); return { h, sig: JSON.stringify(p.intents), level: p.intents.length ? (p.unparsed.length ? 1 : 2) : 0 }; });
+  const votes = (sig: string) => read.filter((r) => r.sig === sig).length;
+  const better = (x: (typeof read)[number], y: (typeof read)[number]) => x.level > y.level || (x.level === y.level && votes(x.sig) > votes(y.sig));
+  return read.reduce((best, r) => (better(r, best) ? r : best), read[0]).h.trim();
+}
+
+async function route(text: string, parsed: ParseResult, server: BackendHealth | null): Promise<Routed> {
   if (NEGATION.test(text)) {
     // The backend still sees it, e.g. "nahi chahiye" answering its pending question.
-    const res = online ? await backend.text(text) : null;
+    const res = server ? await backend.text(text) : null;
     const refuse = parsed.lang === 'hi' ? 'Theek hai, nahi karunga.' : "Okay, I won't do that.";
     return { intents: [], say: res?.reason_code === 'cancelled_by_user' ? res.response_text : refuse, engine: res ? 'backend' : 'local' };
   }
   const local = parsed.intents;
   const localOnly = local.length > 1 || local.some((i) => !BACKEND_DOMAIN.has(i.type));
-  if (!online || localOnly) return { intents: local, engine: 'local' };
+  if (!server || (localOnly && !parsed.unparsed.length)) return { intents: local, engine: 'local' };
+  const llm = async () => (server.llm_ready ? (await backend.interpret(text).catch(() => null))?.intents ?? [] : []);
+
+  // Several clauses, some not understood ("AC 22 kar do aur mahaul romantic bana do"): the LLM reads the
+  // whole sentence. On the test set this beat both the parser's partial reading and LLM-on-the-unread-clauses-
+  // only (53.6% vs 47.9% on multi-command sentences): a clause cut out of its sentence loses its meaning.
+  // A single vague clause ("AC ka kuch karo") goes to the backend instead, which asks what was meant.
+  if (local.length && parsed.unparsed.length && parsed.clauses > 1) {
+    const intents = await llm();
+    return intents.length ? { intents, engine: 'llm' } : { intents: local, engine: 'local' };
+  }
 
   const res = await backend.text(text);
   if (res.decision === 'execute' && res.action) {
     const remote = toIntent(res.action);
     if (!remote) return { intents: local, engine: 'local' };
-    const keepLocal = res.source === 'builtin' && local.length === 1 && agrees(local[0], remote);
-    return { intents: [keepLocal ? local[0] : remote], engine: 'backend' };
+    // Shortcuts and dialog answers are the backend's; so is a command only the classifier read.
+    if (res.source !== 'builtin' || !local.length) return { intents: [remote], engine: 'backend' };
+    if (local.length === 1 && agrees(local[0], remote)) return { intents: [local[0]], engine: 'backend' };
+    const intents = await llm(); // parser and classifier read it differently
+    return intents.length ? { intents, engine: 'llm' } : { intents: [remote], engine: 'backend' };
+  }
+  const unsure = (res.decision === 'reject' && res.reason_code === 'unsupported_request')
+    || (res.decision === 'clarify' && res.reason_code === 'low_confidence');
+  if (unsure) {
+    const intents = await llm();
+    if (intents.length) return { intents, engine: 'llm' };
   }
   if (res.decision === 'reject' && res.reason_code === 'unsupported_request' && local.length) {
     return { intents: local, engine: 'local' };
@@ -103,20 +146,51 @@ export default function App() {
   ]);
   const [toast, setToast] = useState<Toast | null>(null);
   const [phase, setPhase] = useState<VoicePhase>('idle');
-  const [reply, setReply] = useState<{ text: string; intents: Intent[]; understood: boolean; engine?: Routed['engine'] } | null>(null);
+  // asks: the reply is a question (the mic reopens for the answer); confirm: a yes/no question.
+  const [reply, setReply] = useState<{ text: string; intents: Intent[]; understood: boolean; asks: boolean; confirm: boolean } | null>(null);
+  const [heard, setHeard] = useState<{ text: string; via: 'voice' | 'text' | 'chip' } | null>(null);
   const [server, setServer] = useState<BackendHealth | null>(null);
   const serverRef = useRef(server);
   useEffect(() => { serverRef.current = server; }, [server]);
   const awaitingConfirm = useRef(false);
+  // Opens the mic (if closed) for the answer to a question the car just asked; set once the mic exists.
+  const listenForAnswer = useRef<() => void>(() => {});
   // BhashaDrive's own recogniser when the backend has one; the browser's otherwise.
   const [asrMode, setAsrMode] = useState<'browser' | 'server'>('server');
   const [recording, setRecording] = useState<{ stop: () => Promise<Blob> } | null>(null);
   const [asrError, setAsrError] = useState<string | null>(null);
   const [speechLang, setSpeechLang] = useState<'en-IN' | 'hi-IN'>('en-IN');
   const [tts, setTts] = useState(true);
-  const [showLog, setShowLog] = useState(() => window.innerWidth > 1100);
+  const [showLog, setShowLog] = useState(false);
   const [demo, setDemo] = useState<number | null>(null);
-  const [focused, setFocused] = useState(false);
+  const [view, setView] = useState<CockpitView>('cabin');
+  // BharatConnect (driver <-> passenger translation) owns the microphone while it is open.
+  const [bharatOpen, setBharatOpen] = useState(false);
+  const [teachingVoice, setTeachingVoice] = useState(false);
+  const teachingRecRef = useRef<{ stop: () => Promise<Blob> } | null>(null);
+  const [speakerStatus, setSpeakerStatus] = useState<SpeakerStatus | null>(null);
+  const hasEnrolledSpeakers = !!speakerStatus && Object.values(speakerStatus.enrolled).some((n) => (n ?? 0) > 0);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  const refreshSpeakers = useCallback(() => {
+    backend.speakers().then(setSpeakerStatus, () => setSpeakerStatus(null));
+  }, []);
+
+  useEffect(() => {
+    refreshSpeakers();
+  }, [refreshSpeakers]);
+
+  useEffect(() => {
+    if (!showProfileMenu) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target instanceof Element && e.target.closest('.teach-voice-group'))) {
+        setShowProfileMenu(false);
+      }
+    };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [showProfileMenu]);
+
   const ttsRef = useRef(tts);
   useEffect(() => { ttsRef.current = tts; }, [tts]);
 
@@ -125,12 +199,34 @@ export default function App() {
     setCar(next);
   }, []);
 
-  const handleCommand = useCallback((text: string, via: ChatMessage['via']) => {
+  /** `speaker`: the driver profile the backend recognised from the voice, switched to before the command runs. */
+  const handleCommand = useCallback((text: string, via: ChatMessage['via'], speaker?: ProfileId) => {
     carAudio.unlock();
     setMessages((m) => [...m, { id: nextId++, role: 'user', text, via }]);
+    setHeard({ text, via: via ?? 'text' });
     setPhase('thinking');
     const started = Date.now();
     const parsed = parseCommand(text, nlu.current);
+    let greeting = '';
+    if (speaker && !parsed.intents.some((i) => i.type === 'profile')) {
+      if (speaker !== carRef.current.profile) {
+        const sw = runIntents(carRef.current, [{ type: 'profile', id: speaker }], parsed.lang, { speed: engine.speed });
+        if (sw.state.profile === speaker) { // not refused (moving car)
+          commit(sw.state);
+          if (sw.toast) setToast({ ...sw.toast, id: nextId++ });
+          const name = PROFILES[speaker].name;
+          greeting = parsed.lang === 'hi' ? `Namaste ${name}, seat aapke hisaab se set. ` : `Hi ${name}, I've set your seat. `;
+        }
+      } else {
+        // Speaker matched current profile: show confirmation toast so driver knows their voice was recognized
+        setToast({
+          id: nextId++,
+          icon: 'seat',
+          label: `Driver: ${PROFILES[speaker].name}`,
+          value: 'Voice recognized',
+        });
+      }
+    }
     nlu.current = parsed.context;
     const online = serverRef.current !== null;
 
@@ -139,24 +235,29 @@ export default function App() {
       const out = say
         ? { state: carRef.current, text: say, toast: undefined, understood: true }
         : runIntents(carRef.current, intents, parsed.lang, { speed: engine.speed });
+      out.text = greeting + out.text;
       commit(out.state);
       if (out.state.ignition === 'on' && intents.some((i) => i.type === 'rev')) engine.blip(1300);
       if (out.toast) setToast({ ...out.toast, id: nextId++ });
       setMessages((m) => [...m, { id: nextId++, role: 'car', text: out.text, intents, engine: online ? via : undefined }]);
-      setReply({ text: out.text, intents, understood: out.understood, engine: online ? via : undefined });
+      // The car asked something ("Should I...?", "Did you mean...?"): open the mic for the answer.
+      const asks = !!awaiting || /\?\s*$/.test(say ?? '');
+      setReply({ text: out.text, intents, understood: out.understood, asks, confirm: !!awaiting });
       carAudio.chime(out.understood ? 'ok' : 'error');
-      if (ttsRef.current) {
+      const answerBack = () => { if (asks) window.setTimeout(() => listenForAnswer.current(), 300); }; // let the speaker fall silent
+      if (ttsRef.current && 'speechSynthesis' in window) {
         speak(out.text,
           () => { setPhase('speaking'); carAudio.duck(true); },
-          () => { setPhase('idle'); carAudio.duck(false); });
+          () => { setPhase('idle'); carAudio.duck(false); answerBack(); });
         // Some browsers never fire onstart without voices; don't get stuck.
         window.setTimeout(() => setPhase((p) => (p === 'thinking' ? 'idle' : p)), 1500);
       } else {
         setPhase('idle');
+        answerBack();
       }
     };
 
-    route(text, parsed, online)
+    route(text, parsed, serverRef.current)
       .catch((): Routed => {
         setServer(null); // backend went away: carry on with the local parser
         return { intents: parsed.intents, engine: 'local' };
@@ -180,17 +281,46 @@ export default function App() {
   }, []);
 
   // Touch controls on the virtual screen and dashboard skip the voice round-trip.
+  // Touch controls on the virtual screen and dashboard skip the voice round-trip.
   const handleIntent = useCallback((intent: Intent) => {
     carAudio.unlock();
+    const prevIgnition = carRef.current.ignition;
     const out = runIntents(carRef.current, [intent], 'en', { speed: engine.speed });
     commit(out.state);
     if (out.toast && intent.type !== 'screen') setToast({ ...out.toast, id: nextId++ });
+
+    // When the car powers on into ACC or ON mode
+    const isPoweringOn = intent.type === 'ignition' && 
+      (out.state.ignition === 'acc' || out.state.ignition === 'on') && 
+      out.state.ignition !== prevIgnition;
+
+    if (isPoweringOn) {
+      const g = getTimeGreeting();
+      const modeLabel = out.state.ignition === 'on' ? 'Engine started' : 'Electronics on';
+      const welcomeText = `${g.en}! ${modeLabel}. Say "Hey car" or speak to set your profile.`;
+      setReply({ text: welcomeText, intents: [{ type: 'greet' }], understood: true, asks: true, confirm: false });
+      setMessages((m) => [...m, { id: nextId++, role: 'car', text: welcomeText }]);
+      carAudio.chime('ok');
+      if (ttsRef.current && 'speechSynthesis' in window) {
+        speak(
+          welcomeText,
+          () => { setPhase('speaking'); carAudio.duck(true); },
+          () => {
+            setPhase('idle');
+            carAudio.duck(false);
+            window.setTimeout(() => {
+              if (listenForAnswer.current) listenForAnswer.current();
+            }, 300);
+          }
+        );
+      }
+    }
   }, [commit]);
 
   const speechFailed = useRef<(code: string) => boolean>(() => false);
   const speech = useSpeechRecognition((text) => handleCommand(text, 'voice'), (code) => speechFailed.current(code));
   const serverAsr = !!server?.asr_ready;
-  const useServerAsr = serverAsr && (asrMode === 'server' || !speech.supported);
+  const useServerAsr = serverAsr && (asrMode === 'server' || !speech.supported || hasEnrolledSpeakers);
   const micSupported = speech.supported || serverAsr;
 
   // Server speech recognition: record in the browser, transcribe on the backend (Whisper).
@@ -206,7 +336,8 @@ export default function App() {
         setPhase('thinking');
         try {
           const t = await backend.transcribe(audio);
-          if (t.text.trim()) handleCommand(t.text.trim(), 'voice');
+          console.log('[Voice Command] Transcribe result:', t);
+          if (t.text.trim()) handleCommand(bestTranscript(t, nlu.current), 'voice', t.speaker?.profile);
           else { setPhase('idle'); setAsrError(t.error ?? 'No speech heard. Try again.'); }
         } catch {
           setPhase('idle');
@@ -217,6 +348,98 @@ export default function App() {
       setAsrError('Microphone permission denied');
     }
   }, [recording, handleCommand]);
+
+  // Teach the car the active driver's voice from the topbar button.
+  const toggleTeachVoice = useCallback(async () => {
+    carAudio.unlock();
+    if (teachingRecRef.current) {
+      try {
+        await teachingRecRef.current.stop();
+      } catch {
+        // finished
+      }
+      return;
+    }
+
+    const activeProfile = carRef.current.profile;
+    const profileName = PROFILES[activeProfile].name;
+
+    try {
+      setTeachingVoice(true);
+      setAsrError(null);
+      setToast({
+        id: nextId++,
+        icon: 'seat',
+        label: `Listening to ${profileName}`,
+        value: 'Speak to teach voice',
+      });
+
+      const rec = await recordAudio(9000, 1400);
+      teachingRecRef.current = rec;
+
+      const audio = await rec.done;
+      teachingRecRef.current = null;
+      setPhase('thinking');
+
+      // Enroll voice embedding in CAM++ and transcribe what was said concurrently
+      const [enrollRes, transcribeRes] = await Promise.allSettled([
+        backend.enroll(activeProfile, audio),
+        backend.transcribe(audio),
+      ]);
+
+      if (enrollRes.status === 'rejected') {
+        throw enrollRes.reason;
+      }
+
+      refreshSpeakers();
+      const samples = enrollRes.value.samples;
+
+      let spokenText = '';
+      if (transcribeRes.status === 'fulfilled' && transcribeRes.value.text?.trim()) {
+        spokenText = bestTranscript(transcribeRes.value, nlu.current);
+      }
+
+      if (spokenText) {
+        setToast({
+          id: nextId++,
+          icon: 'seat',
+          label: `Voice Learned: ${profileName}`,
+          value: `Executing: “${spokenText}”`,
+        });
+        handleCommand(spokenText, 'voice', activeProfile);
+      } else {
+        const replyMsg = `Namaste ${profileName}! I've learned your voice. From now on, whenever you give a voice command, the car will recognize you, adjust your seat, and set your preferences automatically.`;
+        setMessages((m) => [...m, { id: nextId++, role: 'car', text: replyMsg }]);
+        setReply({ text: replyMsg, intents: [], understood: true, asks: false, confirm: false });
+        setToast({
+          id: nextId++,
+          icon: 'seat',
+          label: `Voice Learned: ${profileName}`,
+          value: `${samples} voiceprint${samples > 1 ? 's' : ''} saved`,
+        });
+        carAudio.chime('ok');
+        if (ttsRef.current && 'speechSynthesis' in window) {
+          speak(replyMsg, () => { setPhase('speaking'); carAudio.duck(true); }, () => { setPhase('idle'); carAudio.duck(false); });
+        } else {
+          setPhase('idle');
+        }
+      }
+    } catch (err) {
+      teachingRecRef.current = null;
+      setPhase('idle');
+      const msg = err instanceof Error ? err.message : String(err);
+      const isShort = msg.toLowerCase().includes('at least') || msg.toLowerCase().includes('short') || msg.toLowerCase().includes('speech');
+      setToast({
+        id: nextId++,
+        icon: 'seat',
+        label: 'Voice Training',
+        value: isShort ? 'Sample too short (need 2s+)' : 'Enrollment failed',
+      });
+      carAudio.chime('error');
+    } finally {
+      setTeachingVoice(false);
+    }
+  }, [handleCommand, refreshSpeakers]);
 
   // Chrome's recogniser streams audio to Google; when that fails ("network"), carry on with the
   // backend's Whisper for the rest of the session and keep listening, so the driver need not repeat the tap.
@@ -241,6 +464,10 @@ export default function App() {
     carAudio.chime('listen');
     speech.start(speechLang);
   }, [speech, speechLang, useServerAsr, recording, toggleServerMic]);
+
+  useEffect(() => {
+    listenForAnswer.current = () => { if (micSupported && !recording && !speech.listening) toggleMic(); };
+  }, [micSupported, recording, speech.listening, toggleMic]);
 
   // The flasher relay ticks while the hazards or an indicator are blinking
   useEffect(() => { carAudio.flasher(car.hazard || car.indicator !== 'off'); }, [car.hazard, car.indicator]);
@@ -296,13 +523,13 @@ export default function App() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
-      if (e.code === 'Space' && !typing && micSupported) { e.preventDefault(); toggleMic(); }
-      if (e.key.toLowerCase() === 'z' && !typing) setFocused((f) => !f);
+      if (e.code === 'Space' && !typing && micSupported && !bharatOpen) { e.preventDefault(); toggleMic(); }
+      if (e.key.toLowerCase() === 'z' && !typing) setView((v) => NEXT_VIEW[v]);
       if (e.key === '/' && !typing) { e.preventDefault(); document.querySelector<HTMLInputElement>('.bar input')?.focus(); }
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [toggleMic, micSupported]);
+  }, [toggleMic, micSupported, bharatOpen]);
 
   // Guided demo: feed the next scripted line once the car has finished answering
   useEffect(() => {
@@ -319,15 +546,17 @@ export default function App() {
   }, [demo, phase, handleCommand]);
 
   const scene = SCENES[car.scene];
-  const livePhase: VoicePhase = speech.listening || recording ? 'listening' : phase;
-  const nluBadge = server
-    ? `BhashaDrive NLU${server.mock ? ' (mock)' : ''} · English · हिन्दी · Hinglish`
-    : 'Offline NLU · English · हिन्दी · Hinglish';
+  const livePhase: VoicePhase = teachingVoice ? 'listening' : speech.listening || recording ? 'listening' : phase;
+  const status = {
+    text: server ? `BhashaDrive NLU${server.mock ? ' (mock)' : ''} · English · हिन्दी · Hinglish` : 'Offline NLU · English · हिन्दी · Hinglish',
+    online: !!server,
+    detail: server ? `Backend connected: ${server.nlu} · ASR ${server.asr ?? 'none'}` : 'Backend not reachable: using the in-browser parser',
+  };
 
   return (
     <div className={`app scene-${scene.id}`}>
-      <Cockpit car={car} scene={scene} toast={toast} onIntent={handleIntent} reserveBottom={DOCK_HEIGHT}
-        focused={focused} onToggleFocus={() => setFocused((f) => !f)} onMic={toggleMic}
+      <Cockpit car={car} scene={scene} toast={toast} onIntent={handleIntent}
+        view={view} onToggleFocus={() => setView((v) => (v === 'screen' ? 'cabin' : 'screen'))} onMic={toggleMic}
         voice={{ phase: livePhase, interim: speech.interim, reply: reply?.text ?? '' }} />
 
       <header className="topbar">
@@ -336,24 +565,98 @@ export default function App() {
           <span className="brand-sub">Smart Cockpit <i>·</i> Voice AI</span>
         </div>
         <div className="top-actions">
-          <span className={`badge ${server ? 'online' : ''}`}
-            title={server ? `Backend connected: ${server.nlu} · ASR ${server.asr ?? 'none'}` : 'Backend not reachable: using the in-browser parser'}>{nluBadge}</span>
           <button className={demo !== null ? 'on' : ''} onClick={() => { carAudio.unlock(); setDemo(demo === null ? 0 : null); }}
             title="Run a guided demo">{demo !== null ? <Square /> : <Play />}<span>{demo !== null ? 'Stop demo' : 'Demo'}</span></button>
-          <button onClick={() => handleIntent({ type: 'scene', scene: NEXT_SCENE[car.scene] })}
-            title="Switch view: live drawn cockpit, night photo, day photo"><Layers /><span>{SCENE_LABEL[car.scene]}</span></button>
-          <button className={focused ? 'on' : ''} onClick={() => setFocused(!focused)} title="Lean in to the screen (Z)">
-            {focused ? <ZoomOut /> : <ZoomIn />}<span>{focused ? 'Cabin' : 'Screen'}</span></button>
-          <button className={showLog ? 'on' : ''} onClick={() => setShowLog(!showLog)} title="Conversation log"><MessageSquareText /></button>
-          <button onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen())} title="Full screen"><Maximize /></button>
+          <div className="views" role="radiogroup" aria-label="Camera view (Z)">
+            {VIEWS.map(([v, label, Icon]) => (
+              <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => setView(v)}
+                title={`${label} view (Z)`}><Icon /><span>{label}</span></button>
+            ))}
+          </div>
+
+          {/* Teach Voice Button with Driver Profile Selector */}
+          <div className="teach-voice-group">
+            <button
+              className={`teach-voice-btn ${teachingVoice ? 'rec' : ''} ${(speakerStatus?.enrolled[car.profile] ?? 0) > 0 ? 'has-voice' : ''}`}
+              onClick={() => void toggleTeachVoice()}
+              title={teachingVoice ? 'Click to stop & save voice' : `Click to record & teach the car ${PROFILES[car.profile].name}'s voice`}
+            >
+              {teachingVoice ? (
+                <>
+                  <span className="rec-pulse-dot" />
+                  <span>Recording... Stop</span>
+                </>
+              ) : (
+                <>
+                  <Fingerprint className="voice-icon" />
+                  <span>Teach Voice</span>
+                  <span className="teach-profile-tag" style={{ '--tag-c': PROFILES[car.profile].accent } as CSSProperties}>
+                    {PROFILES[car.profile].name}
+                    {(speakerStatus?.enrolled[car.profile] ?? 0) > 0 && (
+                      <span className="voice-count-num">({speakerStatus?.enrolled[car.profile]})</span>
+                    )}
+                  </span>
+                </>
+              )}
+            </button>
+            <button
+              className="teach-profile-picker-toggle"
+              onClick={() => setShowProfileMenu((v) => !v)}
+              title="Change driver profile to teach"
+              aria-label="Change driver profile to teach"
+            >
+              <ChevronDown size={13} />
+            </button>
+            {showProfileMenu && (
+              <div className="teach-profile-dropdown" role="menu">
+                <div className="teach-dropdown-header">Select Profile to Teach:</div>
+                {PROFILE_IDS.map((id) => {
+                  const prof = PROFILES[id];
+                  const count = speakerStatus?.enrolled[id] ?? 0;
+                  const isActive = id === car.profile;
+                  return (
+                    <button
+                      key={id}
+                      role="menuitem"
+                      className={`teach-dropdown-item ${isActive ? 'active' : ''}`}
+                      onClick={() => {
+                        handleIntent({ type: 'profile', id });
+                        setShowProfileMenu(false);
+                      }}
+                    >
+                      <span className="prof-avatar" style={{ background: prof.accent }}>{prof.name[0]}</span>
+                      <div className="prof-meta">
+                        <span className="prof-name">{prof.name}</span>
+                        <span className="prof-height">{prof.heightCm} cm · {prof.build}</span>
+                      </div>
+                      <span className={`prof-enroll-tag ${count > 0 ? 'enrolled' : ''}`}>
+                        {count > 0 ? `${count} saved` : 'No voice'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <button className={bharatOpen ? 'on' : ''} onClick={() => setBharatOpen(true)} title="Two-way voice translation between driver and passenger">
+            <Languages /><span>BharatConnect</span></button>
+          <SettingsMenu status={status} speechLang={speechLang} onLang={setSpeechLang}
+            tts={tts} onTts={(v) => { setTts(v); if (!v) window.speechSynthesis?.cancel(); }}
+            asr={serverAsr && speech.supported ? asrMode : undefined} onAsr={setAsrMode}
+            sceneLabel={SCENE_LABEL[car.scene]} onNextScene={() => handleIntent({ type: 'scene', scene: NEXT_SCENE[car.scene] })}
+            showLog={showLog} onLog={setShowLog} />
         </div>
       </header>
 
+      {view === 'seats' && <SeatView car={car} onIntent={handleIntent} />}
+
+      {bharatOpen && <BharatConnect onClose={() => setBharatOpen(false)} />}
+
       {showLog && <Transcript messages={messages} onClose={() => setShowLog(false)} onClear={() => setMessages([])} />}
 
-      <VoiceDock phase={livePhase} interim={speech.interim} reply={reply} supported={micSupported} error={speech.error ?? asrError}
-        speechLang={speechLang} tts={tts} onLang={setSpeechLang} onTts={(v) => { setTts(v); if (!v) window.speechSynthesis?.cancel(); }}
-        asr={serverAsr && speech.supported ? asrMode : undefined} onAsr={setAsrMode}
+      <VoiceDock phase={livePhase} interim={speech.interim} heard={heard} reply={reply} error={speech.error ?? asrError}
+        suggestions={suggestionsFor(reply?.intents ?? [], !!reply?.confirm)} supported={micSupported}
         onMic={toggleMic} onSend={handleCommand} />
     </div>
   );

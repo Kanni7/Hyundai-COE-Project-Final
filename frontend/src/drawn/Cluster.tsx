@@ -196,7 +196,8 @@ export function Cluster({ car }: { car: CarState }) {
     const t0 = performance.now();
     let raf = 0;
     const loop = (now: number) => {
-      const p = Math.min(1, (now - t0) / 1500);
+      // The first frame's timestamp can precede t0; a negative p would make the sweep NaN.
+      const p = Math.min(1, Math.max(0, (now - t0) / 1500));
       if (p < 1) {
         render(0, engine.telemetry(), Math.sin(Math.PI * p) ** 1.4);
         raf = requestAnimationFrame(loop);

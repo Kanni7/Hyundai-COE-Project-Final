@@ -53,6 +53,15 @@ VALID_INCAR_WORDS = {
     "radio", "chalao", "baja", "start", "resume", "roko", "stop", "ruk", "agla", "agle", "skip", "pichla",
     "pichle", "back", "badha", "increase", "raise", "tez", "upar", "ghatao", "ghata", "decrease", "lower",
     "dheema", "dheemi", "halka", "chalu", "enable", "band", "bandh", "disable", "khidki",
+} | {
+    # Ambient lighting: colour names and light words are understood by the cockpit's parser, so they must
+    # reach it intact (unprotected, "blue" was retrieved as "volume", "colour" as "blower", "green" as "degree").
+    "light", "lights", "lighting", "ambient", "mood", "roshni", "batti", "colour", "color", "colours", "colors",
+    "rang", "shade", "red", "laal", "lal", "maroon", "blue", "neela", "neeli", "nila", "nili", "navy", "green",
+    "hara", "hari", "purple", "violet", "lavender", "baingani", "baingni", "jamuni", "pink", "gulabi",
+    "gulaabi", "magenta", "orange", "narangi", "naarangi", "kesari", "kesariya", "saffron", "white", "safed",
+    "safaid", "yellow", "peela", "peeli", "pila", "pili", "cyan", "teal", "aqua", "turquoise", "aasmani",
+    "asmani", "sky", "gold", "golden", "sunehra", "sunehri",
 }
 
 # In-car vocabulary words used for phonetic competition

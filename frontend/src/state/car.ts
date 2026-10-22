@@ -1,5 +1,6 @@
 import type { AmbientColor, CarState, ClusterView, Genre, Intent, Lang, Reply, Toast } from '../types';
 import { AMBIENT_MODES, HUE_STEPS } from '../lib/ambient';
+import { fitFor, PROFILE_IDS, PROFILES } from '../lib/profiles';
 
 export const TEMP_MIN = 16;
 export const TEMP_MAX = 30;
@@ -65,12 +66,13 @@ export const initialCar: CarState = {
   windows: { driver: 0, passenger: 0 },
   sunroof: false,
   seats: { driver: 0, passenger: 0 },
+  profile: 'priya',
   nav: null,
   phone: null,
   driveMode: 'normal',
   headlights: false,
   hazard: false,
-  ignition: 'acc',
+  ignition: 'off',
   gear: 'P',
   indicator: 'off',
   cabinLight: false,
@@ -86,6 +88,13 @@ export const initialCar: CarState = {
 
 export const engineOn = (s: CarState) => s.ignition === 'on';
 export const powered = (s: CarState) => s.ignition !== 'off';
+
+export function getTimeGreeting(): { en: string; hi: string } {
+  const hr = new Date().getHours();
+  if (hr >= 4 && hr < 12) return { en: 'Good morning', hi: 'Good morning' };
+  if (hr >= 12 && hr < 17) return { en: 'Good afternoon', hi: 'Good afternoon' };
+  return { en: 'Good evening', hi: 'Good evening' };
+}
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const fmt = (t: number) => `${t.toFixed(1).replace(/\.0$/, '')}°C`;
@@ -358,6 +367,24 @@ export function applyIntent(s: CarState, it: Intent, env: Env = { speed: 0 }): {
       };
     }
 
+    case 'profile': {
+      const id = it.id ?? PROFILE_IDS[(PROFILE_IDS.indexOf(s.profile) + 1) % PROFILE_IDS.length];
+      const p = PROFILES[id];
+      if (id === s.profile && it.id) return { state: s, reply: r(`${p.name}'s profile is already active.`, `${p.name} ka profile pehle se laga hai.`) };
+      // Memory seats only move at a standstill: a seat sliding under a moving driver is a hazard.
+      if (env.speed > 5) return { state: s, reply: r(`Please stop first: the seat can't move while driving.`, `Pehle gaadi rokiye, chalte waqt seat nahi hil sakti.`) };
+      const f = fitFor(p);
+      const col = COLOR_LABEL[p.prefs.ambient];
+      return {
+        state: { ...s, profile: id, climate: { ...c, temp: p.prefs.temp }, ambient: { ...s.ambient, color: p.prefs.ambient, hue: null },
+          driveMode: p.prefs.driveMode },
+        reply: r(
+          `Welcome, ${p.name}. Seat ${f.liftMm} mm up and ${f.slideMm} mm back, steering set for ${p.heightCm} cm. AC ${fmt(p.prefs.temp)}, ${col.en} lights, ${p.prefs.driveMode} mode.`,
+          `Namaste ${p.name}! Seat aur steering aapki height (${p.heightCm} cm) ke hisaab se set. AC ${fmt(p.prefs.temp)}, ${col.hi} light, ${p.prefs.driveMode} mode.`,
+          { icon: 'seat', label: 'Driver profile', value: p.name }),
+      };
+    }
+
     case 'nav.start': {
       const h = hash(it.destination);
       const known: Record<string, [number, number]> = { Home: [24, 11.2], Office: [32, 15.8], Airport: [46, 27.4] };
@@ -430,7 +457,27 @@ export function applyIntent(s: CarState, it: Intent, env: Env = { speed: 0 }): {
         adas: { ...s.adas, cruise: to === 'on' ? s.adas.cruise : null },
       };
       const toast = { icon: 'power' as const, label: 'Ignition', value: to.toUpperCase() };
-      if (to === 'on') return { state, reply: r('Engine started. Welcome aboard!', 'Gaadi start ho gayi. Swagat hai!', toast) };
+      if (to === 'on') {
+
+        const g = getTimeGreeting();
+
+        return {
+
+          state,
+
+          reply: r(
+
+            `${g.en}! Engine started. Say "Hey car" to set your profile.`,
+
+            `${g.hi}! Engine start ho gaya. Apna profile set karne ke liye "Hey car" boliye.`,
+
+            toast,
+
+          ),
+
+        };
+
+      }
       if (to === 'acc') {
         return { state, reply: from === 'on'
           ? r('Engine off. Accessories stay on.', 'Engine band, accessories chalu hain.', toast)

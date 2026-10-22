@@ -16,6 +16,8 @@ export type Gear = 'P' | 'R' | 'N' | 'D';
 /** Push-button ignition: OFF, ACC (electronics on, engine off) and ON (engine running). */
 export type Ignition = 'off' | 'acc' | 'on';
 export type Indicator = 'off' | 'left' | 'right';
+/** Stored driver profiles (lib/profiles.ts): body size drives seat and steering position. */
+export type ProfileId = 'priya' | 'meera' | 'rohan' | 'aarav';
 
 export type Intent =
   | { type: 'climate.setTemp'; value: number }
@@ -48,6 +50,8 @@ export type Intent =
   | { type: 'lights.head'; on: boolean }
   | { type: 'lights.hazard'; on: boolean }
   | { type: 'scene'; scene: SceneId }
+  /** Switch driver profile; without an id, the next one. */
+  | { type: 'profile'; id?: ProfileId }
   | { type: 'ignition'; mode: Ignition }
   | { type: 'rev' }
   | { type: 'gear'; gear: Gear }
@@ -75,6 +79,8 @@ export interface CarState {
   windows: { driver: number; passenger: number };
   sunroof: boolean;
   seats: { driver: number; passenger: number };
+  /** Active driver profile: sets seat and steering position and the driver's preferences. */
+  profile: ProfileId;
   nav: { destination: string; minutes: number; km: number; startedAt: number } | null;
   phone: { contact: string; startedAt: number } | null;
   driveMode: DriveMode;
@@ -116,5 +122,5 @@ export interface ChatMessage {
   intents?: Intent[];
   via?: 'voice' | 'text' | 'chip';
   /** Which NLU understood the command (set only while the backend is connected). */
-  engine?: 'backend' | 'local';
+  engine?: 'backend' | 'local' | 'llm';
 }

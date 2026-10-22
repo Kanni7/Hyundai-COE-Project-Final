@@ -1,27 +1,25 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { Mic, Send, Square, Volume2, VolumeX } from 'lucide-react';
-import type { Intent } from '../types';
-import { describeIntent, SUGGESTIONS } from '../lib/intents';
+import { Mic, Send, Square } from 'lucide-react';
 import type { VoicePhase } from './Infotainment';
 
 interface Props {
   phase: VoicePhase;
+  /** Live words from the browser recogniser while listening (the server recogniser has none). */
   interim: string;
-  reply: { text: string; intents: Intent[]; understood: boolean; engine?: 'backend' | 'local' } | null;
+  /** The last command as the car understood it: the transcript after rescoring, or the typed text. */
+  heard: { text: string; via: 'voice' | 'text' | 'chip' } | null;
+  /** `asks`: the reply is a question, so the mic reopens for the answer. */
+  reply: { text: string; understood: boolean; asks: boolean } | null;
+  suggestions: string[];
   supported: boolean;
   error: string | null;
-  speechLang: 'en-IN' | 'hi-IN';
-  tts: boolean;
-  /** Speech recogniser choice, shown only when both the browser and the backend can transcribe. */
-  asr?: 'browser' | 'server';
-  onLang: (l: 'en-IN' | 'hi-IN') => void;
-  onTts: (v: boolean) => void;
-  onAsr: (a: 'browser' | 'server') => void;
   onMic: () => void;
   onSend: (text: string, via: 'text' | 'chip') => void;
 }
 
-export function VoiceDock({ phase, interim, reply, supported, error, speechLang, tts, asr, onLang, onTts, onAsr, onMic, onSend }: Props) {
+const HEARD_LABEL = { voice: 'You said', text: 'You typed', chip: 'You chose' } as const;
+
+export function VoiceDock({ phase, interim, heard, reply, suggestions, supported, error, onMic, onSend }: Props) {
   const [text, setText] = useState('');
   const input = useRef<HTMLInputElement>(null);
   const submit = (e: FormEvent) => {
@@ -31,31 +29,34 @@ export function VoiceDock({ phase, interim, reply, supported, error, speechLang,
     setText('');
   };
   const listening = phase === 'listening';
+  const answering = listening && !!reply?.asks;
+
+  const status = listening ? (answering ? 'Listening for your answer…' : 'Listening…')
+    : phase === 'thinking' ? 'Understanding…'
+      : phase === 'speaking' ? 'Speaking'
+        : error ?? (supported ? 'Tap the mic or press Space to talk' : 'Type a command below');
+  // While listening the old exchange gives way to the live words (keeping a question being answered);
+  // while thinking only the new command shows.
+  const heardLine = listening ? (interim ? { text: interim, via: 'voice' as const } : null) : heard;
+  const replyLine = phase === 'thinking' || (listening && !answering) ? null : reply;
 
   return (
     <div className="dock">
-      {(reply || listening || error) && (
-        <div className={`reply ${reply && !reply.understood ? 'miss' : ''}`} key={listening ? 'l' : reply?.text}>
-          {listening ? (
-            <p className="interim">{interim || (speechLang === 'hi-IN' ? 'बोलिए…' : 'Listening… speak in English, Hindi or Hinglish')}</p>
-          ) : error ? (
-            <p className="interim">{error}</p>
-          ) : reply && (
-            <>
-              <p>{reply.text}</p>
-              {(reply.intents.length > 0 || reply.engine) && (
-                <div className="intents">
-                  {reply.engine && <code className={`engine ${reply.engine}`}>{reply.engine === 'backend' ? 'BhashaDrive' : 'local parser'}</code>}
-                  {reply.intents.map((i, k) => <code key={k}>{describeIntent(i)}</code>)}
-                </div>
-              )}
-            </>
-          )}
+      <section className={`voice ${phase} ${error && phase === 'idle' ? 'error' : ''} ${replyLine && !replyLine.understood ? 'miss' : ''}`}
+        aria-live="polite">
+        <div className="voice-status">
+          <span className="wave" aria-hidden="true"><i /><i /><i /><i /><i /></span>
+          <b>{status}</b>
+          {listening && !interim && <small>English, हिन्दी or Hinglish</small>}
         </div>
-      )}
+        {heardLine && (
+          <p className="voice-heard"><small>{HEARD_LABEL[heardLine.via]}</small><span>“{heardLine.text}”</span></p>
+        )}
+        {replyLine && <p className="voice-reply" key={replyLine.text}>{replyLine.text}</p>}
+      </section>
 
-      <div className="suggest" role="list">
-        {SUGGESTIONS.map((s) => (
+      <div className="suggest" role="list" aria-label="Suggestions">
+        {suggestions.map((s) => (
           <button key={s} role="listitem" onClick={() => onSend(s, 'chip')}>{s}</button>
         ))}
       </div>
@@ -67,20 +68,7 @@ export function VoiceDock({ phase, interim, reply, supported, error, speechLang,
           {listening && <><i /><i /></>}
         </button>
         <input ref={input} value={text} onChange={(e) => setText(e.target.value)}
-          placeholder={supported ? 'Bolo ya likho… "AC 20 pe kar do", "garmi lag rahi hai"' : 'Type a command… "AC 20 pe kar do"'} aria-label="Command" />
-        <div className="lang" role="radiogroup" aria-label="Speech language">
-          <button type="button" className={speechLang === 'en-IN' ? 'on' : ''} onClick={() => onLang('en-IN')}>EN</button>
-          <button type="button" className={speechLang === 'hi-IN' ? 'on' : ''} onClick={() => onLang('hi-IN')}>हिं</button>
-        </div>
-        {asr && (
-          <div className="lang" role="radiogroup" aria-label="Speech recogniser">
-            <button type="button" className={asr === 'browser' ? 'on' : ''} onClick={() => onAsr('browser')} title="Browser speech recognition (Web Speech API)">Web</button>
-            <button type="button" className={asr === 'server' ? 'on' : ''} onClick={() => onAsr('server')} title="BhashaDrive server speech recognition (Whisper)">Server</button>
-          </div>
-        )}
-        <button type="button" className="icon" onClick={() => onTts(!tts)} title={tts ? 'Voice replies on' : 'Voice replies off'} aria-label="Toggle voice replies">
-          {tts ? <Volume2 /> : <VolumeX />}
-        </button>
+          placeholder={supported ? 'Bolo ya likho… "AC 20 pe kar do"' : 'Type a command… "AC 20 pe kar do"'} aria-label="Command" />
         <button type="submit" className="send" aria-label="Send" disabled={!text.trim()}><Send /></button>
       </form>
     </div>

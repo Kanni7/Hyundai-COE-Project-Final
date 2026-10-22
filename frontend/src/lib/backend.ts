@@ -2,17 +2,21 @@
 // voice NLU for its whitelisted domain (climate, fan, volume, media, navigation):
 // negation, confirmations, personal shortcuts and parameter validation. The local
 // parser handles everything else, and everything when the backend is unreachable.
+// Sentences neither can read with confidence go to the backend's command LLM (`interpret`).
 
-import type { Intent } from '../types';
+import type { Intent, ProfileId } from '../types';
 
-const API = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
+export const API = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
 const TIMEOUT_MS = 4000;
 const TRANSCRIBE_TIMEOUT_MS = 30000; // CPU speech recognition takes a few seconds per utterance
+const INTERPRET_TIMEOUT_MS = 8000; // the command LLM: ~0.3-1 s on a laptop CPU
 
 export interface BackendHealth {
   nlu: string;
   asr: string | null;
   asr_ready: boolean;
+  /** The command LLM (fallback interpreter) is loaded. */
+  llm_ready?: boolean;
   vehicle: string;
   mock: boolean;
 }
@@ -36,9 +40,20 @@ export interface BackendResult {
 export interface Transcription {
   /** Recogniser output after phonetic + attention rescoring: what the command model sees. */
   text: string;
+  /** Every distinct rescored decoding pass, `text` first (ranked by the backend's climate/media classifier). */
+  hypotheses?: string[];
   status: string;
   error: string | null;
   engine: string | null;
+  /** Driver recognised from the voice (enrolled voiceprints), or null when unsure or nobody is enrolled. */
+  speaker?: { profile: ProfileId; score: number } | null;
+}
+
+export interface SpeakerStatus {
+  /** Speaker model installed on the backend. */
+  ready: boolean;
+  /** Enrolled sentences per profile. */
+  enrolled: Partial<Record<ProfileId, number>>;
 }
 
 async function call<T>(path: string, init?: RequestInit, timeoutMs = TIMEOUT_MS): Promise<T> {
@@ -58,6 +73,9 @@ export const backend = {
   reset: () => call<{ ok: boolean }>('/reset', { method: 'POST' }),
   text: (text: string) =>
     call<BackendResult>('/text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }),
+  /** Any sentence -> cockpit commands, by the command LLM. The backend validates every command. */
+  interpret: (text: string) =>
+    call<{ intents: Intent[]; latency_s: number }>('/interpret', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }, INTERPRET_TIMEOUT_MS),
   /** The backend decodes Hindi and English passes itself and returns the one the command model reads best. */
   transcribe: (audio: Blob) => {
     const fd = new FormData();
@@ -65,6 +83,17 @@ export const backend = {
     fd.append('file', audio, `speech.${ext}`);
     return call<Transcription>('/transcribe', { method: 'POST', body: fd }, TRANSCRIBE_TIMEOUT_MS);
   },
+  speakers: () => call<SpeakerStatus>('/speaker'),
+  /** Adds one spoken sentence to a profile's voiceprint (the backend keeps only the embedding). */
+  enroll: async (profile: ProfileId, audio: Blob) => {
+    const fd = new FormData();
+    fd.append('file', audio, `voice.${audio.type.includes('mp4') ? 'mp4' : audio.type.includes('ogg') ? 'ogg' : 'webm'}`);
+    const res = await fetch(`${API}/speaker/${profile}`, { method: 'POST', body: fd });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.detail ?? `HTTP ${res.status}`);
+    return j as { profile: ProfileId; samples: number };
+  },
+  forget: (profile: ProfileId) => call<{ samples: number }>(`/speaker/${profile}`, { method: 'DELETE' }),
 };
 
 /** Frontend intent types whose meaning the backend NLU covers. */

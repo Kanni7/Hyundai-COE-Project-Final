@@ -2,7 +2,7 @@
 // Runs fully offline. Swap `parseCommand` for an LLM call later; the Intent
 // contract in types.ts stays the same.
 
-import type { AmbientColor, AmbientMode, Genre, Intent, Lang, Mood, Page, Zone } from '../types';
+import type { AmbientColor, AmbientMode, Genre, Intent, Lang, Mood, Page, ProfileId, Zone } from '../types';
 
 type Domain = 'climate' | 'fan' | 'volume' | 'media' | 'ambient' | 'seat';
 
@@ -15,6 +15,11 @@ export interface ParseResult {
   intents: Intent[];
   lang: Lang;
   context: NluContext;
+  /** Clauses (of two or more words) that yielded no command, or only a default reading ("light" -> light on):
+   *  the sentence was only partly understood. */
+  unparsed: string[];
+  /** Clauses the sentence was split into ("AC 22 kar do aur light neeli karo" -> 2). */
+  clauses: number;
 }
 
 // ---------------------------------------------------------------- vocab
@@ -70,7 +75,7 @@ const W = {
   question: ['kitna', 'kitne', 'kitni', 'what', 'whats', 'how much', 'kya hai', 'batao', 'tell me', 'konsa', 'kaunsa', 'kaun sa', 'which', 'कितना', 'कितने', 'कितनी', 'क्या है', 'बताओ', 'कौन सा'],
   fuel: ['fuel', 'petrol', 'diesel', 'tank', 'range', 'टंकी', 'पेट्रोल'],
   time: ['time', 'samay', 'baje', 'टाइम', 'समय', 'बजे'],
-  greet: ['hello', 'hi', 'hey', 'hii', 'namaste', 'namaskar', 'नमस्ते', 'नमस्कार', 'good morning', 'good evening', 'good afternoon'],
+  greet: ['hello', 'hi', 'hey', 'hii', 'hey car', 'hey verna', 'hey gaadi', 'namaste', 'namaskar', 'नमस्ते', 'नमस्कार', 'good morning', 'good evening', 'good afternoon'],
   help: ['help', 'kya kar sakte', 'what can you do', 'madad', 'मदद', 'commands'],
   thanks: ['thanks', 'thank you', 'thank', 'shukriya', 'dhanyavaad', 'dhanyawad', 'धन्यवाद', 'शुक्रिया'],
   repeat: ['aur', 'more', 'again', 'phir se', 'fir se', 'ek baar aur', 'once more', 'और'],
@@ -107,17 +112,31 @@ const W = {
   colourWord: ['colour', 'color', 'rang', 'shade', 'रंग'],
 } satisfies Record<string, string[]>;
 
+/**
+ * Colour names, mapped onto the ten preset ambient colours. Romanised Hindi has no fixed spelling, so each
+ * word appears in the spellings speech recognition writes (neeli / nili / neele, gulabi / gulaabi). Multi-word
+ * names ("sky blue") win over the single words inside them (see colorsIn).
+ */
 const COLORS: Record<AmbientColor, string[]> = {
-  red: ['red', 'laal', 'lal', 'लाल'],
-  blue: ['blue', 'neela', 'neeli', 'nila', 'नीला', 'नीली'],
-  green: ['green', 'hara', 'हरा', 'हरी'],
-  purple: ['purple', 'violet', 'baingani', 'jamuni', 'बैंगनी', 'जामुनी'],
-  pink: ['pink', 'gulabi', 'गुलाबी'],
-  orange: ['orange', 'narangi', 'kesari', 'kesariya', 'saffron', 'नारंगी', 'केसरिया'],
-  white: ['white', 'safed', 'safaid', 'सफ़ेद', 'सफेद'],
-  yellow: ['yellow', 'peela', 'peeli', 'पीला', 'पीली'],
-  cyan: ['cyan', 'teal', 'aqua', 'aasmani', 'आसमानी'],
-  gold: ['gold', 'golden', 'sunehra', 'sunehri', 'सुनहरा'],
+  red: ['red', 'laal', 'lal', 'laali', 'lali', 'maroon', 'crimson', 'scarlet', 'cherry', 'wine', 'blood red',
+    'लाल', 'मैरून'],
+  blue: ['blue', 'neela', 'neeli', 'neele', 'nila', 'nili', 'nile', 'neelaa', 'neel', 'navy', 'navy blue',
+    'dark blue', 'royal blue', 'indigo', 'नीला', 'नीली', 'नीले', 'नील'],
+  green: ['green', 'hara', 'hari', 'hare', 'haraa', 'haree', 'lime', 'emerald', 'olive', 'dhani', 'dhaani',
+    'हरा', 'हरी', 'हरे', 'धानी'],
+  purple: ['purple', 'violet', 'lavender', 'lilac', 'mauve', 'baingani', 'baingni', 'bengani', 'bainganee',
+    'jamuni', 'jamni', 'jaamuni', 'बैंगनी', 'जामुनी'],
+  pink: ['pink', 'hot pink', 'gulabi', 'gulaabi', 'gulabee', 'gulaabee', 'magenta', 'fuchsia', 'rose',
+    'rani pink', 'गुलाबी'],
+  orange: ['orange', 'narangi', 'naarangi', 'narangee', 'santri', 'santra', 'kesari', 'kesariya', 'keshariya',
+    'kesaria', 'bhagwa', 'saffron', 'amber', 'नारंगी', 'केसरिया', 'भगवा', 'संतरी'],
+  white: ['white', 'cool white', 'safed', 'safaid', 'sufaid', 'shwet', 'सफ़ेद', 'सफेद', 'श्वेत'],
+  yellow: ['yellow', 'peela', 'peeli', 'peele', 'pila', 'pili', 'peelaa', 'lemon', 'basanti', 'पीला',
+    'पीली', 'पीले', 'बसंती'],
+  cyan: ['cyan', 'teal', 'aqua', 'turquoise', 'sky blue', 'light blue', 'aasmani', 'asmani', 'aasmaani',
+    'firozi', 'phirozi', 'feroza', 'आसमानी', 'फ़िरोज़ी', 'फिरोजी'],
+  gold: ['gold', 'golden', 'sunehra', 'sunehri', 'sunehre', 'sunahra', 'sunahri', 'champagne', 'warm white',
+    'सुनहरा', 'सुनहरी', 'सुनहरे'],
 };
 
 /** Ambient light effects. Generic words like "flow" only count next to a light or colour word. */
@@ -164,6 +183,15 @@ const NUM_WORDS: Record<string, number> = {
   'चौबीस': 24, 'पच्चीस': 25, 'छब्बीस': 26, 'सत्ताईस': 27, 'अट्ठाईस': 28, 'उनतीस': 29, 'तीस': 30,
 };
 
+// Romanised Hindi number words are spelled every which way by speech recognition ("pachchis", "pachchees",
+// "pachis", "pachees" all mean 25): compare a skeleton with long vowels shortened and doubled letters merged.
+const skeleton = (w: string) => w.replace(/chh/g, 'ch').replace(/ee/g, 'i').replace(/aa/g, 'a').replace(/oo/g, 'u')
+  .replace(/(.)\1+/g, '$1').replace(/chch/g, 'ch');
+const NUM_SKELETONS: Record<string, number> = Object.fromEntries(
+  Object.entries(NUM_WORDS).filter(([w]) => /^[a-z]+$/.test(w)).map(([w, v]) => [skeleton(w), v]));
+const numWord = (t: string | undefined): number | undefined =>
+  t === undefined ? undefined : NUM_WORDS[t] ?? (/^[a-z]{3,}$/.test(t) ? NUM_SKELETONS[skeleton(t)] : undefined);
+
 const HINDI_MARKERS = new Set([
   'karo', 'kar', 'kardo', 'hai', 'hain', 'ho', 'rahi', 'raha', 'lag', 'chalao', 'chala', 'bajao', 'band',
   'kam', 'badhao', 'zyada', 'jyada', 'thoda', 'thodi', 'aur', 'mujhe', 'mera', 'meri', 'ko', 'pe', 'par',
@@ -181,6 +209,12 @@ const PLACES: [string[], string][] = [
   [['hospital', 'अस्पताल'], 'Nearest hospital'],
   [['ev charger', 'charging', 'charger'], 'Nearest EV charger'],
 ];
+
+const PROFILE_NAMES: Record<ProfileId, string[]> = {
+  priya: ['priya', 'प्रिया'], meera: ['meera', 'mira', 'मीरा'], rohan: ['rohan', 'रोहन'], aarav: ['aarav', 'arav', 'आरव'],
+};
+const PROFILE_WORDS = ['profile', 'profiles', 'driver profile', 'user profile', 'प्रोफाइल', 'प्रोफ़ाइल'];
+const I_AM = ['main', 'mai', 'i am', 'im', 'this is', 'मैं'];
 
 const CONTACTS: [string[], string][] = [
   [['mummy', 'mumma', 'mom', 'mother', 'maa', 'मम्मी', 'माँ', 'मां'], 'Mummy'],
@@ -205,7 +239,7 @@ const fold = (s: string) => s.normalize('NFD').replace(/\u093C/g, '').normalize(
 function normalize(raw: string): string {
   return fold(raw)
     .toLowerCase()
-    .replace(/^\s*(hey|hi|hello|ok|okay)\s+(hyundai|verna)\b[\s,]*/, '')
+    .replace(/^\s*(hey|hi|hello|ok|okay)\s+(hyundai|verna|car|gaadi)\b[\s,]*/, '')
     .replace(/[०-९]/g, (d) => String('०१२३४५६७८९'.indexOf(d)))
     .replace(/a\s*[./]\s*c\b\.?/g, 'ac')
     .replace(/[’'`"]/g, '')
@@ -240,17 +274,19 @@ class Clause {
     return (Object.keys(map) as K[]).find((k) => this.has(map[k]));
   }
   number(min = 0, max = 200): number | undefined {
-    const digits = this.text.match(/\d+(?:\.\d+)?/g);
+    // Speech recognition writes "twenty two" as "20 2": join a tens number and a following single digit.
+    const spoken = this.text.replace(/\b([1-9]0) ([1-9])\b/g, (_, tens: string, unit: string) => String(+tens + +unit));
+    const digits = spoken.match(/\d+(?:\.\d+)?/g);
     if (digits) {
       const n = digits.map(Number).find((v) => v >= min && v <= max);
       if (n !== undefined) return n;
     }
     for (let i = 0; i < this.tokens.length; i++) {
-      const t = this.tokens[i];
-      let v = NUM_WORDS[t];
+      let v = numWord(this.tokens[i]);
       if (v === undefined) continue;
       // "twenty two" / "twenty-two"
-      if (v === 20 && NUM_WORDS[this.tokens[i + 1]] < 10) v += NUM_WORDS[this.tokens[i + 1]];
+      const unit = numWord(this.tokens[i + 1]);
+      if (v === 20 && unit !== undefined && unit < 10) v += unit;
       if (v >= min && v <= max) return v;
     }
     const hyphen = this.text.match(/twenty-(one|two|three|four|five|six|seven|eight|nine)/);
@@ -268,6 +304,64 @@ class Clause {
     if (this.has(W.driver)) return 'driver';
     return fallback;
   }
+}
+
+// Every colour name as tokens, longest first, so "sky blue" is claimed before "blue".
+const COLOR_NAMES = (Object.keys(COLORS) as AmbientColor[])
+  .flatMap((k) => COLORS[k].map((w) => ({ k, words: fold(w).split(' ') })))
+  .sort((a, b) => b.words.length - a.words.length);
+
+// Romanised colour stems whose endings speech recognition spells freely ("gulaabhi", "gulaabik",
+// "gulaab bhi", "gulaabigaro"): a word starting with one names the colour.
+const COLOR_STEMS: [string, AmbientColor][] = [
+  ['gulaab', 'pink'], ['gulab', 'pink'], ['baingan', 'purple'], ['bengan', 'purple'], ['jaamun', 'purple'], ['jamun', 'purple'],
+  ['naarang', 'orange'], ['narang', 'orange'], ['kesar', 'orange'], ['keshar', 'orange'], ['santr', 'orange'],
+  ['suneh', 'gold'], ['sunah', 'gold'], ['aasman', 'cyan'], ['aasmaan', 'cyan'], ['asman', 'cyan'], ['firoz', 'cyan'],
+  ['phiroz', 'cyan'], ['feroz', 'cyan'], ['basant', 'yellow'], ['safed', 'white'], ['safaid', 'white'], ['sufaid', 'white'],
+];
+// One-word colour names long enough for a one-letter slip ("neelli", "gren") to be safely the colour.
+const FUZZY_COLORS = COLOR_NAMES.filter(({ words }) => words.length === 1 && words[0].length >= 5 && /^[a-z]+$/.test(words[0]));
+
+function within1(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++;
+    else if (b.length > a.length) j++;
+    else { i++; j++; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
+/**
+ * The colours a clause names, in the order they are spoken ("dual tone blue purple" -> blue, purple).
+ * `loose` (the talk is about lights): also accept colour stems with any ending and one-letter slips,
+ * which is how speech recognition spells Hindi colour names. Without it "gulaab jamun" would be a colour.
+ */
+function colorsIn(c: Clause, loose = false): AmbientColor[] {
+  const taken = new Array<boolean>(c.tokens.length).fill(false);
+  const found: { k: AmbientColor; at: number }[] = [];
+  for (const { k, words } of COLOR_NAMES) {
+    for (let i = 0; i + words.length <= c.tokens.length; i++) {
+      if (words.every((w, j) => !taken[i + j] && c.tokens[i + j] === w)) {
+        words.forEach((_, j) => { taken[i + j] = true; });
+        found.push({ k, at: i });
+      }
+    }
+  }
+  if (loose) {
+    c.tokens.forEach((t, i) => {
+      if (taken[i] || t.length < 5) return;
+      const k = COLOR_STEMS.find(([stem]) => t.startsWith(stem))?.[1]
+        ?? FUZZY_COLORS.find(({ words }) => within1(t, words[0]))?.k;
+      if (k) found.push({ k, at: i });
+    });
+  }
+  return found.sort((a, b) => a.at - b.at).map((x) => x.k);
 }
 
 const step = (c: Clause, small: number, normal: number, big: number) =>
@@ -302,7 +396,9 @@ function detectLang(text: string): Lang {
 
 // ---------------------------------------------------------------- clause parser
 
-function parseClause(c: Clause, ctx: NluContext): { intents: Intent[]; domain?: Domain } {
+// `weak`: a default reading ("light" -> light on, "degree" -> AC on) with no word that asked for it: the clause
+// said something more specific the parser could not read ("isi ko pachchis degree"), so it is not understood.
+function parseClause(c: Clause, ctx: NluContext): { intents: Intent[]; domain?: Domain; weak?: boolean } {
   const on = c.has(W.on);
   const off = c.has(W.off);
   const up = c.has(W.up);
@@ -339,6 +435,13 @@ function parseClause(c: Clause, ctx: NluContext): { intents: Intent[]; domain?: 
     if (c.has(W.photo)) return { intents: [{ type: 'scene', scene: c.has(W.day) ? 'day' : 'night' }] };
     if (c.has(W.night) || c.has(['live', 'drawn'])) return { intents: [{ type: 'scene', scene: 'live' }] };
     if (c.has(W.day)) return { intents: [{ type: 'scene', scene: 'day' }] };
+  }
+
+  // Driver profile: "Priya ka profile lagao", "switch to Aarav's profile", "main Meera hoon", "profile badlo".
+  // A name alone is not enough ("Priya ko call karo" is a call).
+  if (!c.has(W.callTrigger)) {
+    const who = (Object.keys(PROFILE_NAMES) as ProfileId[]).find((id) => c.has(PROFILE_NAMES[id]));
+    if (c.has(PROFILE_WORDS) || (who && c.has(I_AM))) return { intents: [who ? { type: 'profile', id: who } : { type: 'profile' }] };
   }
 
   // Phone
@@ -415,14 +518,13 @@ function parseClause(c: Clause, ctx: NluContext): { intents: Intent[]; domain?: 
     }
   }
 
-  // Cabin (dome) light, before ambient lighting claims the word "light"
-  if (c.has(W.cabinLight)) return { intents: [{ type: 'lights.cabin', on: !off }] };
+  // Cabin (dome) light, before ambient lighting claims the word "light". The dome light has no colour,
+  // so a colour ("andar ki light neeli karo") means the ambient lighting.
+  const colors = colorsIn(c, c.has(W.ambient) || c.has(W.colourWord) || ctx.domain === 'ambient');
+  if (c.has(W.cabinLight) && !colors.length) return { intents: [{ type: 'lights.cabin', on: !off }] };
 
   // Ambient light effects ("breathing red light", "light music ke saath", "dual tone blue purple")
   const effect = c.find(AMB_MODES);
-  const colors = (Object.keys(COLORS) as AmbientColor[])
-    .map((k) => ({ k, at: Math.min(...COLORS[k].map((w) => c.tokens.indexOf(fold(w))).filter((i) => i >= 0)) }))
-    .filter((x) => Number.isFinite(x.at)).sort((a, b) => a.at - b.at).map((x) => x.k);
   if (effect && !off && (c.has(W.ambient) || colors.length || c.has(['rainbow', 'satrangi', 'disco', 'dual tone', 'सतरंगी']))) {
     const out: Intent[] = [];
     if (effect === 'dual') {
@@ -509,7 +611,7 @@ function parseClause(c: Clause, ctx: NluContext): { intents: Intent[]; domain?: 
 
   // Media
   const genre = c.find(GENRES);
-  const color = c.find(COLORS);
+  const color = colors[0];
   const skipWord = (c.has(W.next) || c.has(W.prev)) && !color && !c.has(W.ambient);
   if (c.has(W.media) || (genre && on) || skipWord || c.has(['play', 'bajao', 'बजाओ', 'resume', 'pause'])) {
     if (skipWord && c.has(W.prev)) return { intents: [{ type: 'media.skip', dir: -1 }], domain: 'media' };
@@ -521,7 +623,7 @@ function parseClause(c: Clause, ctx: NluContext): { intents: Intent[]; domain?: 
     }
     const radio = c.has(W.radio);
     const freq = radio ? c.number(87.5, 108) : undefined;
-    return { intents: [{ type: 'media.play', genre, radio, freq }], domain: 'media' };
+    return { intents: [{ type: 'media.play', genre, radio, freq }], domain: 'media', weak: !on && !genre && !radio };
   }
 
   // Ambient lighting
@@ -533,7 +635,7 @@ function parseClause(c: Clause, ctx: NluContext): { intents: Intent[]; domain?: 
     if (up || down) {
       return { intents: [{ type: 'ambient.brightness', delta: step(c, 0.1, 0.2, 0.4) * (down ? -1 : 1) }], domain: 'ambient' };
     }
-    return { intents: [{ type: 'ambient.power', on: true }], domain: 'ambient' };
+    return { intents: [{ type: 'ambient.power', on: true }], domain: 'ambient', weak: !on };
   }
 
   // Fan / blower
@@ -571,7 +673,7 @@ function parseClause(c: Clause, ctx: NluContext): { intents: Intent[]; domain?: 
       const d = step(c, 1, 2, 3) * (raise ? 1 : -1);
       return { intents: [{ type: 'climate.adjustTemp', delta: d }], domain: 'climate' };
     }
-    if (on || hasClimate) return { intents: [{ type: 'climate.power', on: true }], domain: 'climate' };
+    if (on || hasClimate) return { intents: [{ type: 'climate.power', on: true }], domain: 'climate', weak: !on };
   }
 
   // "driver side 20": the AC is single-zone, so any side sets the cabin temperature
@@ -611,7 +713,7 @@ export function parseCommand(raw: string, ctx: NluContext = {}): ParseResult {
   const lang = detectLang(raw);
   const text = normalize(raw);
   const parts = text
-    .split(/\s(?:aur|and|और|then|phir|fir|also|plus|तथा|फिर|saath hi)\s|\s,\s/)
+    .split(/\s(?:aur|and|or|और|then|phir|fir|also|plus|तथा|फिर|saath hi)\s|\s,\s/) // "or": ASR's spelling of "aur"
     .map((s) => s.trim())
     .filter(Boolean);
 
@@ -620,8 +722,13 @@ export function parseCommand(raw: string, ctx: NluContext = {}): ParseResult {
 
   const intents: Intent[] = [];
   const context: NluContext = { ...ctx };
+  const unparsed: string[] = [];
+  let clauses = 0; // of two or more words: a lone "bhai," or "listen," is not a clause
   for (const part of parts.length ? parts : [text]) {
-    const { intents: found, domain } = parseClause(new Clause(part), context);
+    const clause = new Clause(part);
+    if (clause.tokens.length > 1) clauses++;
+    const { intents: found, domain, weak } = parseClause(clause, context);
+    if ((!found.length || weak) && clause.tokens.length > 1) unparsed.push(part);
     if (domain) context.domain = domain;
     for (const it of found) {
       intents.push(it);
@@ -632,7 +739,7 @@ export function parseCommand(raw: string, ctx: NluContext = {}): ParseResult {
       if (d) context.domain = d;
     }
   }
-  return { intents: tidy(intents, text), lang, context };
+  return { intents: tidy(intents, text), lang, context, unparsed, clauses: Math.max(1, clauses) };
 }
 
 function tidy(intents: Intent[], text: string): Intent[] {

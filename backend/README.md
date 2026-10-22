@@ -82,6 +82,52 @@ Synthetic audio (Windows only, offline OneCore voices):
 Real recordings: `python scripts/record_eval_set.py --speaker s01 --noise car_idle`, then
 `python -m bhashadrive.evaluation.eval_asr --models swift apex --manifest samples/real/manifest.json`.
 
+### Command LLM (fallback interpreter)
+
+A fine-tuned Gemma 3 270M turns sentences the parser and classifier cannot read with confidence into
+cockpit commands (several per sentence), served at `POST /interpret`. It runs on the CPU via llama.cpp
+(`models/llm/cockpit-gemma-270m.q8_0.gguf`, ~290 MB); without the file the backend runs without it.
+Training needs Hugging Face access to `google/gemma-3-270m-it` (accept the Gemma licence, `hf auth login`)
+and a separate environment with CUDA torch, `transformers` and llama.cpp's `convert_hf_to_gguf.py`
+(from the llama.cpp commit that `llama-cpp-python` vendors, with its `gguf-py`):
+
+```bash
+python -m bhashadrive.training.command_llm_data                                   # data/command_llm/*.jsonl
+python -m bhashadrive.training.train_command_llm --convert-script <llama.cpp>/convert_hf_to_gguf.py
+python -m bhashadrive.evaluation.eval_command_llm                                 # reports/command_llm_eval.json
+```
+
+## BharatConnect (driver ↔ passenger voice translation)
+
+Two-way push-to-talk translation in the cockpit (top bar → **BharatConnect**): the driver speaks, the
+passenger hears it in their language, then the passenger replies and the driver hears the translation.
+Tamil, Hindi and English in any direction (one row per language in `bharat/languages.py`).
+
+One turn: microphone (stops on a pause, a second tap or 15 s) → `POST /bharat/transcribe` (Faster-Whisper,
+in the speaker's language) → `POST /bharat/translate` (Google Cloud Translation v3) → `POST /bharat/speak`
+(Google Cloud Text-to-Speech, MP3) → playback. Each stage is its own request: the UI shows the stage, a failed
+turn retries from that stage, and the per-stage and end-to-end timings (end of speech → translated audio
+starts) are measured in the browser and shown on every turn. Both microphones are locked while a turn is
+processed or its audio plays, so the system never records its own speech.
+
+**Google Cloud setup** (both services need it; credentials stay on the backend):
+
+1. In a Google Cloud project, enable the **Cloud Translation API** and the **Cloud Text-to-Speech API**.
+2. Create a service account with the role **Cloud Translation API User** and download a JSON key
+   (keep it out of source control), or use `gcloud auth application-default login` on a developer machine.
+3. Set, in the backend's environment or `.env`:
+
+   ```
+   GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\service-account.json
+   GOOGLE_CLOUD_PROJECT=your-project-id
+   ```
+
+Without them the panel opens and shows what is missing; transcription still works. Optional settings:
+`BD_BHARAT_ASR_MODEL` (default `small`; `large-v3-turbo` is far more accurate for Tamil, a one-time
+~1.6 GB download: start once with `BD_ASR_LOCAL_ONLY=false`), `BD_BHARAT_MAX_AUDIO_S` (30),
+`BD_BHARAT_TRANSLATE_TIMEOUT_S` (8), `BD_BHARAT_TTS_TIMEOUT_S` (10). Recordings are deleted after
+transcription and conversation text is not logged; repeated phrases are served from small in-memory caches.
+
 ## Running
 
 ```bash

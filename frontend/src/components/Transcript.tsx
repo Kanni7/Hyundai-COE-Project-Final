@@ -4,6 +4,7 @@ import type { ChatMessage } from '../types';
 import { describeIntent } from '../lib/intents';
 
 const VIA = { voice: Mic, text: Keyboard, chip: MousePointerClick };
+const ENGINE_LABEL = { backend: 'BhashaDrive', local: 'local parser', llm: 'command LLM' } as const;
 
 export function Transcript({ messages, onClose, onClear }: { messages: ChatMessage[]; onClose: () => void; onClear: () => void }) {
   const end = useRef<HTMLDivElement>(null);
@@ -26,7 +27,7 @@ export function Transcript({ messages, onClose, onClear }: { messages: ChatMessa
               <p>{Via && <Via />}{m.text}</p>
               {((m.intents && m.intents.length > 0) || m.engine) && (
                 <div className="intents">
-                  {m.engine && <code className={`engine ${m.engine}`}>{m.engine === 'backend' ? 'BhashaDrive' : 'local parser'}</code>}
+                  {m.engine && <code className={`engine ${m.engine}`}>{ENGINE_LABEL[m.engine]}</code>}
                   {m.intents?.map((i, k) => <code key={k}>{describeIntent(i)}</code>)}
                 </div>
               )}

@@ -88,7 +88,7 @@ class FasterWhisperASR(SpeechRecognizer):
         audio = preprocess(audio)
         allowed_langs = self.config.allowed_languages
         try:
-            segs, info = self._decode(audio, self.config.language)  # None -> automatic detection
+            segs, info = self._decode(audio, self.config.language, self.config.initial_prompt)  # None -> auto-detect
             detected = info.language
             if self.config.language is None and allowed_langs and detected not in allowed_langs:
                 # Detected an unsupported language (e.g. Hinglish misread as Arabic): re-decode with the
@@ -96,28 +96,11 @@ class FasterWhisperASR(SpeechRecognizer):
                 # code-switched speech is still transcribed in a single pass.
                 probs = [(l, p) for l, p in (info.all_language_probs or []) if l in allowed_langs]
                 if probs:
-                    segs, info = self._decode(audio, max(probs, key=lambda x: x[1])[0])
+                    segs, info = self._decode(audio, max(probs, key=lambda x: x[1])[0], self.config.initial_prompt)
         except Exception as exc:
             return ASRResult(text="", status="error", error=f"Whisper inference failed: {exc}")
         latency = time.perf_counter() - t0
-        valid_segs = []
-        _HALLUCINATIONS = {
-            "thank you", "thank you.", "thanks for watching", "thanks for watching.",
-            "thank you for watching", "subtitles by", "please subscribe", "bye.", "bye"
-        }
-        min_logprob = getattr(self.config, "min_avg_logprob", -1.0)
-        prompt = (self.config.initial_prompt or "").lower()
-        for s in segs:
-            stext = s.text.strip()
-            if stext.lower() in _HALLUCINATIONS or s.no_speech_prob > 0.85:
-                continue
-            bare = stext.lower().strip(" .,!?:;")
-            if bare and bare in prompt:
-                continue  # the initial prompt read back verbatim ("In-car voice commands."), not speech
-            if s.avg_logprob < min_logprob or (s.no_speech_prob > 0.6 and s.avg_logprob < -0.8):
-                continue  # low-confidence decode: noise or prompt regurgitation, not speech
-            valid_segs.append(s)
-        raw_text = " ".join(s.text.strip() for s in valid_segs).strip()
+        raw_text = " ".join(s.text.strip() for s in self._kept(segs, self.config.initial_prompt)).strip()
         from ..nlu.normalizer import to_english
         # Snapping/phonetic normalisation runs once, in the pipeline, so raw_text stays inspectable.
         text = to_english(raw_text)
@@ -140,7 +123,47 @@ class FasterWhisperASR(SpeechRecognizer):
         )
 
 
-    def _decode(self, audio: np.ndarray, language: str | None):
+    def transcribe_verbatim(self, audio: np.ndarray, language: str, sample_rate: int = TARGET_SR) -> ASRResult:
+        """What was said, in `language` and its own script, for translation: no in-car prompt (it would pull
+        the decode towards car words) and no Hinglish-to-English normalisation."""
+        audio = np.asarray(audio, dtype=np.float32).reshape(-1) if audio is not None else np.zeros(0, np.float32)
+        if audio.size == 0:
+            return ASRResult(text="", status="no_audio", error="No audio samples received")
+        if sample_rate != TARGET_SR:
+            return ASRResult(text="", status="error", error=f"Expected {TARGET_SR} Hz audio, got {sample_rate}")
+        duration = round(audio.shape[0] / sample_rate, 2)
+        if is_silent(audio, self.config.min_rms):
+            return ASRResult(text="", status="silence", duration_s=duration)
+        t0 = time.perf_counter()
+        try:
+            segs, info = self._decode(preprocess(audio), language, prompt=None)
+        except Exception as exc:
+            return ASRResult(text="", status="error", error=f"Whisper inference failed: {exc}")
+        text = " ".join(s.text.strip() for s in self._kept(segs, None)).strip()
+        return ASRResult(text=text, raw_text=text, language=language, duration_s=duration,
+                         status="ok" if text else "silence", latency_s=round(time.perf_counter() - t0, 3))
+
+    _HALLUCINATIONS = {"thank you", "thank you.", "thanks for watching", "thanks for watching.",
+                       "thank you for watching", "subtitles by", "please subscribe", "bye.", "bye"}
+
+    def _kept(self, segs, prompt: str | None) -> list:
+        """Segments that are speech: drops Whisper's stock hallucinations, the prompt read back, and guesses."""
+        min_logprob = getattr(self.config, "min_avg_logprob", -1.0)
+        prompt = (prompt or "").lower()
+        kept = []
+        for s in segs:
+            stext = s.text.strip()
+            if stext.lower() in self._HALLUCINATIONS or s.no_speech_prob > 0.85:
+                continue
+            bare = stext.lower().strip(" .,!?:;")
+            if bare and bare in prompt:
+                continue  # the initial prompt read back verbatim ("In-car voice commands."), not speech
+            if s.avg_logprob < min_logprob or (s.no_speech_prob > 0.6 and s.avg_logprob < -0.8):
+                continue  # low-confidence decode: noise or prompt regurgitation, not speech
+            kept.append(s)
+        return kept
+
+    def _decode(self, audio: np.ndarray, language: str | None, prompt: str | None):
         vad_kwargs = {}
         if self.config.vad_filter and getattr(self.config, "vad_parameters", None):
             vad_kwargs["vad_parameters"] = self.config.vad_parameters
@@ -154,7 +177,7 @@ class FasterWhisperASR(SpeechRecognizer):
             beam_size=beam_size,
             best_of=beam_size,
             vad_filter=self.config.vad_filter,
-            initial_prompt=self.config.initial_prompt,
+            initial_prompt=prompt,
             condition_on_previous_text=False,
             no_speech_threshold=no_speech_th,
             temperature=0.0,  # no sampling fallback: sampling on weak audio invents words from the prompt

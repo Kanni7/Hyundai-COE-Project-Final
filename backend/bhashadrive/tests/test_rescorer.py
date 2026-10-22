@@ -45,6 +45,29 @@ def test_self_attention_rescoring():
     assert meta_clean["rescored"] is False
 
 
+def test_ambient_colour_words_survive_rescoring():
+    # Phonetic retrieval used to turn "blue" into "volume", "colour" into "blower" and "green" into "degree",
+    # so the cockpit only heard "light" and switched it on instead of changing the colour.
+    pipe = build_v2_pipeline(with_asr=False)
+    for text in ["Light ko blue kar do", "Set ambient colour to green", "Light nili kar do", "Light gulaabi karo"]:
+        assert pipe.refine_transcript(text) == text
+
+
+def test_ranked_transcripts_keep_every_distinct_hypothesis():
+    pipe = build_v2_pipeline(with_asr=False)
+    hyps = ["Paz the music please.", "Pause the music please.", "Pause the music please."]
+    ranked = pipe.rank_transcripts(*hyps)
+    assert len(ranked) == 2 and set(ranked) == {"Paz the music please.", "Pause the music please."}  # duplicates merged
+    assert ranked[0] == pipe.refine_transcript(*hyps) == "Pause the music please."
+
+
+def test_pinning_to_performance_cores_is_safe():
+    from bhashadrive import cpu
+
+    cpus = cpu._windows_performance_cpus() if __import__("sys").platform == "win32" else cpu._linux_performance_cpus()
+    assert all(isinstance(c, int) for c in cpus)  # [] on CPUs whose cores are all alike
+
+
 def test_command_model_picks_best_asr_hypothesis():
     pipe = build_v2_pipeline(with_asr=False)
     # Hindi-mode and English-mode decodes of the same audio: keep the one the command model understands.
