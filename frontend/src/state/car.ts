@@ -467,9 +467,9 @@ export function applyIntent(s: CarState, it: Intent, env: Env = { speed: 0 }): {
 
           reply: r(
 
-            `${g.en}! Engine started. Say "Hey car" to set your profile.`,
+            `${g.en}! Engine started.`,
 
-            `${g.hi}! Engine start ho gaya. Apna profile set karne ke liye "Hey car" boliye.`,
+            `${g.hi}! Engine start ho gaya.`,
 
             toast,
 

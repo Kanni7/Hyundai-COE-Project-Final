@@ -297,7 +297,7 @@ export default function App() {
     if (isPoweringOn) {
       const g = getTimeGreeting();
       const modeLabel = out.state.ignition === 'on' ? 'Engine started' : 'Electronics on';
-      const welcomeText = `${g.en}! ${modeLabel}. Say "Hey car" or speak to set your profile.`;
+      const welcomeText = `${g.en}! ${modeLabel}.`;
       setReply({ text: welcomeText, intents: [{ type: 'greet' }], understood: true, asks: true, confirm: false });
       setMessages((m) => [...m, { id: nextId++, role: 'car', text: welcomeText }]);
       carAudio.chime('ok');
