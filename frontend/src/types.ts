@@ -16,8 +16,8 @@ export type Gear = 'P' | 'R' | 'N' | 'D';
 /** Push-button ignition: OFF, ACC (electronics on, engine off) and ON (engine running). */
 export type Ignition = 'off' | 'acc' | 'on';
 export type Indicator = 'off' | 'left' | 'right';
-/** Stored driver profiles (lib/profiles.ts): body size drives seat and steering position. */
-export type ProfileId = 'priya' | 'meera' | 'rohan' | 'aarav';
+/** Driver profile id: 'default' is always present; others are user-created. */
+export type ProfileId = string;
 
 export type Intent =
   | { type: 'climate.setTemp'; value: number }

@@ -31,6 +31,7 @@ Use Chrome or Edge for voice input, because they support the Web Speech API. Oth
 | **Screen** or <kbd>Z</kbd> (or double-click the display) | Moves the camera closer to the infotainment screen. |
 | **View** (layers icon) | Cycles through Live view (drawn cockpit), Night photo and Day photo. |
 | Speaker icon | Turns spoken replies on or off. |
+| Settings → Wind suppression | Turns the server-side filter on/off, adjusts strength and maximum reduction, controls browser capture suppression/AGC, and runs a clean-vs-synthetic-wind ASR comparison. |
 | Dashboard hotspots | Click the hazard button or the horn. Scroll on or click the climate temperatures. |
 
 ### Physical controls in the Live view

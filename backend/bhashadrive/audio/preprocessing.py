@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from .wind_suppression import WindSuppressionSettings, default_wind_settings, reduce_wind_noise
+
 TARGET_SR = 16000
 
 
@@ -64,14 +66,34 @@ def highpass(audio: np.ndarray, cutoff_hz: float = 80.0, width_hz: float = 40.0,
     return np.fft.irfft(np.fft.rfft(audio) * gain, n=audio.size).astype(np.float32)
 
 
-def preprocess(audio: np.ndarray) -> np.ndarray:
-    # Measured on the eval_asr clips (clean and cabin noise): the 80 Hz high-pass lowered WER in every
-    # condition; silence trimming and loudness normalisation did not, so they are not applied.
+def preprocess(
+    audio: np.ndarray,
+    *,
+    wind_strength: float | None = None,
+    max_attenuation_db: float | None = None,
+    wind_settings: WindSuppressionSettings | None = None,
+) -> np.ndarray:
+    """Prepare speech for ASR and apply conservative wind suppression.
+
+    ``wind_settings`` is used by the running app. The individual keyword
+    arguments remain available for scripts and tests; when omitted, the initial
+    settings come from the environment.
+    """
     audio = np.asarray(audio, dtype=np.float32)
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
     if audio.size:
-        audio = highpass(audio - float(np.mean(audio)))  # DC offset and low-frequency rumble
+        audio = audio - float(np.mean(audio))  # DC offset
+        settings = (wind_settings or default_wind_settings()).normalized()
+        if wind_strength is not None:
+            settings.enabled = wind_strength > 0.0
+            settings.strength = wind_strength
+        if max_attenuation_db is not None:
+            settings.max_attenuation_db = max_attenuation_db
+        if settings.enabled:
+            audio = reduce_wind_noise(audio, TARGET_SR, strength=settings.strength,
+                                      max_attenuation_db=settings.max_attenuation_db)
+        audio = highpass(audio)  # residual low-frequency rumble
         peak = float(np.max(np.abs(audio)))
         if peak > 1e-6:
             audio = audio / peak * 0.95

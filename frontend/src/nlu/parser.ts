@@ -4,6 +4,8 @@
 
 import type { AmbientColor, AmbientMode, Genre, Intent, Lang, Mood, Page, ProfileId, Zone } from '../types';
 
+import { getProfiles, type Profile } from '../lib/profiles';
+
 type Domain = 'climate' | 'fan' | 'volume' | 'media' | 'ambient' | 'seat';
 
 export interface NluContext {
@@ -210,9 +212,16 @@ const PLACES: [string[], string][] = [
   [['ev charger', 'charging', 'charger'], 'Nearest EV charger'],
 ];
 
-const PROFILE_NAMES: Record<ProfileId, string[]> = {
-  priya: ['priya', 'प्रिया'], meera: ['meera', 'mira', 'मीरा'], rohan: ['rohan', 'रोहन'], aarav: ['aarav', 'arav', 'आरव'],
-};
+/** Build profile-name lookup dynamically from the profile store. */
+function getProfileNames(): Record<string, string[]> {
+  const profiles = getProfiles();
+  const names: Record<string, string[]> = {};
+  for (const [id, p] of Object.entries(profiles) as [string, Profile][]) {
+    if (id === 'default') continue; // default isn't switchable by name
+    names[id] = [p.name.toLowerCase(), id];
+  }
+  return names;
+}
 const PROFILE_WORDS = ['profile', 'profiles', 'driver profile', 'user profile', 'प्रोफाइल', 'प्रोफ़ाइल'];
 const I_AM = ['main', 'mai', 'i am', 'im', 'this is', 'मैं'];
 
@@ -440,7 +449,8 @@ function parseClause(c: Clause, ctx: NluContext): { intents: Intent[]; domain?: 
   // Driver profile: "Priya ka profile lagao", "switch to Aarav's profile", "main Meera hoon", "profile badlo".
   // A name alone is not enough ("Priya ko call karo" is a call).
   if (!c.has(W.callTrigger)) {
-    const who = (Object.keys(PROFILE_NAMES) as ProfileId[]).find((id) => c.has(PROFILE_NAMES[id]));
+    const pnames = getProfileNames();
+    const who = (Object.keys(pnames) as ProfileId[]).find((id) => c.has(pnames[id]));
     if (c.has(PROFILE_WORDS) || (who && c.has(I_AM))) return { intents: [who ? { type: 'profile', id: who } : { type: 'profile' }] };
   }
 

@@ -8,7 +8,8 @@ import {
 import type { AmbientColor, AmbientMode, CarState, Intent, Mood, Page, Toast } from '../types';
 import { COLOR_LABEL, currentTrack, FAN_MAX, GENRE_LABEL, VOLUME_MAX } from '../state/car';
 import { AMBIENT_MODES, ambientColors, HUE_STEPS, hueCss } from '../lib/ambient';
-import { PROFILE_IDS, PROFILES } from '../lib/profiles';
+import { PROFILES, useProfileIds, useProfiles } from '../lib/profiles';
+import { AddProfileModal } from './AddProfileModal';
 import { EqBars } from './EqBars';
 import { MapView } from './MapView';
 
@@ -42,7 +43,10 @@ export function Infotainment({ car, toast, voice, onIntent, width, height }: Pro
   const style = { width, height, '--accent': accent, fontSize: `${height / 25}px` } as CSSProperties;
   const go = (page: Page) => onIntent({ type: 'screen', page });
   const [picking, setPicking] = useState(false);
-  const me = PROFILES[car.profile];
+  const [showAddModal, setShowAddModal] = useState(false);
+  const profileIds = useProfileIds();
+  const profiles = useProfiles();
+  const me = profiles[car.profile] ?? PROFILES[car.profile];
 
   return (
     <div className="ivi" style={style}>
@@ -72,18 +76,35 @@ export function Infotainment({ car, toast, voice, onIntent, width, height }: Pro
           <div className="ivi-profiles" role="dialog" aria-label="Choose driver profile" onClick={() => setPicking(false)}>
             <small>Who's driving?</small>
             <div>
-              {PROFILE_IDS.map((id) => {
-                const p = PROFILES[id];
+              {profileIds.map((id) => {
+                const item = profiles[id] ?? PROFILES[id];
                 return (
-                  <button key={id} className={id === car.profile ? 'on' : ''} style={{ '--pc': p.accent } as CSSProperties}
+                  <button key={id} className={id === car.profile ? 'on' : ''} style={{ '--pc': item.accent } as CSSProperties}
                     onClick={() => { onIntent({ type: 'profile', id }); setPicking(false); }}>
-                    <i>{p.name[0]}</i><b>{p.name}</b><span>{p.heightCm} cm · {p.build}</span>
+                    <i>{item.name[0]}</i><b>{item.name}</b><span>{item.heightCm} cm · {item.build}</span>
                   </button>
                 );
               })}
+              <button
+                type="button"
+                className="seat-add-btn"
+                style={{ padding: '6px 12px' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPicking(false);
+                  setShowAddModal(true);
+                }}
+              >
+                <i>+</i><b>Add New</b><span>Profile</span>
+              </button>
             </div>
           </div>
         )}
+        <AddProfileModal
+          isOpen={showAddModal}
+          onClose={() => setShowAddModal(false)}
+          onProfileCreated={(np) => onIntent({ type: 'profile', id: np.id })}
+        />
 
         <main className="ivi-body" key={car.screen}>
           {car.screen === 'home' && <HomePage car={car} onIntent={onIntent} go={go} />}

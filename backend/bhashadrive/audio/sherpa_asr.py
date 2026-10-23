@@ -65,7 +65,7 @@ class SherpaWhisperASR(SpeechRecognizer):
         if is_silent(audio, self.config.min_rms):
             return ASRResult(text="", status="silence", duration_s=round(duration, 2))
         t0 = time.perf_counter()
-        fut = self._pool.submit(self._decode, preprocess(audio))
+        fut = self._pool.submit(self._decode, self.preprocess_audio(audio))
         try:
             texts = fut.result(timeout=self.config.timeout_s)
         except FutureTimeout:

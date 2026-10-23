@@ -109,8 +109,8 @@ class SpeakerIDConfig:
     store_path: Path = field(default_factory=lambda: _abs(_env("BD_SPEAKER_STORE", "data/profiles/voiceprints.json")))
     threads: int = field(default_factory=lambda: _env_int("BD_SPEAKER_THREADS", 2))
     # Cosine similarity to accept the best voiceprint, and its lead over the runner-up.
-    threshold: float = field(default_factory=lambda: _env_float("BD_SPEAKER_THRESHOLD", 0.42))
-    margin: float = field(default_factory=lambda: _env_float("BD_SPEAKER_MARGIN", 0.05))
+    threshold: float = field(default_factory=lambda: _env_float("BD_SPEAKER_THRESHOLD", 0.35))
+    margin: float = field(default_factory=lambda: _env_float("BD_SPEAKER_MARGIN", 0.04))
     min_identify_s: float = field(default_factory=lambda: _env_float("BD_SPEAKER_MIN_S", 0.6))
     min_enroll_s: float = field(default_factory=lambda: _env_float("BD_SPEAKER_MIN_ENROLL_S", 1.5))
     max_samples: int = field(default_factory=lambda: _env_int("BD_SPEAKER_MAX_SAMPLES", 6))

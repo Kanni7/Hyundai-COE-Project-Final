@@ -13,11 +13,11 @@ from pathlib import Path
 import numpy as np
 
 from ..config import SpeakerIDConfig
-from ..nlu.cockpit_commands import COMMANDS
+# Profile IDs are now dynamic; no fixed whitelist
 from .preprocessing import TARGET_SR
 
-# The cockpit's profiles (frontend lib/profiles.ts), as the command schema lists them.
-PROFILE_IDS: tuple[str, ...] = tuple(COMMANDS["profile"][0][1]["enum"])
+# Profile IDs are dynamic: any string accepted.
+PROFILE_IDS: None = None  # kept for import compat; no longer filters
 
 
 def _unit(v: np.ndarray) -> np.ndarray:
@@ -32,7 +32,7 @@ class SpeakerID:
         self._samples: dict[str, list[list[float]]] = {}
         if config.store_path.exists():
             data = json.loads(config.store_path.read_text(encoding="utf-8"))
-            self._samples = {p: s for p, s in data.get("samples", {}).items() if p in PROFILE_IDS}
+            self._samples = {p: s for p, s in data.get("samples", {}).items() if p}
 
     @property
     def ready(self) -> bool:
@@ -62,7 +62,7 @@ class SpeakerID:
         if self.config.store_path.exists():
             try:
                 data = json.loads(self.config.store_path.read_text(encoding="utf-8"))
-                self._samples = {p: s for p, s in data.get("samples", {}).items() if p in PROFILE_IDS}
+                self._samples = {p: s for p, s in data.get("samples", {}).items() if p}
             except Exception:
                 pass
 
@@ -77,8 +77,21 @@ class SpeakerID:
             raise ValueError(f"Need at least {self.config.min_enroll_s:g} s of speech; please say the whole sentence.")
         emb = self._embed(speech)
         with self._lock:
+            existing = self._samples.get(profile, [])
+            # Reject outlier: if there are existing samples, the new one must be similar
+            # to the mean of the existing ones (i.e. same person).
+            if existing:
+                mean_emb = _unit(np.mean(existing, axis=0))
+                sim = float(mean_emb @ emb)
+                print(f"[Speaker ID] Enroll {profile}: new sample similarity to existing mean = {sim:.3f}")
+                if sim < 0.35:
+                    raise ValueError(
+                        f"This voice sample doesn't match {profile}'s existing voiceprint "
+                        f"(similarity {sim:.2f}). Please make sure the same person is speaking, "
+                        f"or clear the voice first and re-enroll."
+                    )
             # The newest samples win, so re-enrolling in a new cabin or with a cold tracks the voice.
-            samples = (self._samples.get(profile, []) + [emb.round(5).tolist()])[-self.config.max_samples:]
+            samples = (existing + [emb.round(5).tolist()])[-self.config.max_samples:]
             self._samples[profile] = samples
             self._save()
         return len(samples)

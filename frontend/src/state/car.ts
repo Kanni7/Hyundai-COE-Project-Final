@@ -66,7 +66,7 @@ export const initialCar: CarState = {
   windows: { driver: 0, passenger: 0 },
   sunroof: false,
   seats: { driver: 0, passenger: 0 },
-  profile: 'priya',
+  profile: 'default',
   nav: null,
   phone: null,
   driveMode: 'normal',
@@ -375,13 +375,17 @@ export function applyIntent(s: CarState, it: Intent, env: Env = { speed: 0 }): {
       if (env.speed > 5) return { state: s, reply: r(`Please stop first: the seat can't move while driving.`, `Pehle gaadi rokiye, chalte waqt seat nahi hil sakti.`) };
       const f = fitFor(p);
       const col = COLOR_LABEL[p.prefs.ambient];
+      const isDefault = id === 'default';
+      const enText = isDefault
+        ? `Switched to Default profile. Seat and steering in standard position. AC ${fmt(p.prefs.temp)}, ${col.en} lights, ${p.prefs.driveMode} mode.`
+        : `Welcome, ${p.name}. Seat ${f.liftMm} mm up and ${f.slideMm} mm back, steering set for ${p.heightCm} cm. AC ${fmt(p.prefs.temp)}, ${col.en} lights, ${p.prefs.driveMode} mode.`;
+      const hiText = isDefault
+        ? `Default profile set kar diya hai. Seat aur steering standard position pe. AC ${fmt(p.prefs.temp)}, ${col.hi} light, ${p.prefs.driveMode} mode.`
+        : `Namaste ${p.name}! Seat aur steering aapki height (${p.heightCm} cm) ke hisaab se set. AC ${fmt(p.prefs.temp)}, ${col.hi} light, ${p.prefs.driveMode} mode.`;
       return {
         state: { ...s, profile: id, climate: { ...c, temp: p.prefs.temp }, ambient: { ...s.ambient, color: p.prefs.ambient, hue: null },
           driveMode: p.prefs.driveMode },
-        reply: r(
-          `Welcome, ${p.name}. Seat ${f.liftMm} mm up and ${f.slideMm} mm back, steering set for ${p.heightCm} cm. AC ${fmt(p.prefs.temp)}, ${col.en} lights, ${p.prefs.driveMode} mode.`,
-          `Namaste ${p.name}! Seat aur steering aapki height (${p.heightCm} cm) ke hisaab se set. AC ${fmt(p.prefs.temp)}, ${col.hi} light, ${p.prefs.driveMode} mode.`,
-          { icon: 'seat', label: 'Driver profile', value: p.name }),
+        reply: r(enText, hiText, { icon: 'seat', label: 'Driver profile', value: p.name }),
       };
     }
 

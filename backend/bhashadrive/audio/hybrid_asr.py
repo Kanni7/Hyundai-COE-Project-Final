@@ -11,6 +11,7 @@ from ..config import AppConfig
 from ..schemas import ASRResult
 from .asr import SpeechRecognizer, FasterWhisperASR
 from .preprocessing import TARGET_SR, decode_file
+from .wind_suppression import WindSuppressionSettings
 
 
 class HybridASR(SpeechRecognizer):
@@ -28,6 +29,11 @@ class HybridASR(SpeechRecognizer):
         self._init_local_asr()
         self._update_name()
 
+    def set_wind_settings(self, settings: WindSuppressionSettings) -> None:
+        super().set_wind_settings(settings)
+        if self._local_asr is not None:
+            self._local_asr.set_wind_settings(self.get_wind_settings())
+
     def _init_local_asr(self):
         # BD_LOCAL_ASR picks the order: "sherpa" (default: the V2 hi-hinglish model, trained on
         # code-switched speech, decoded in Hindi and English passes) or "whisper" (generic
@@ -40,6 +46,7 @@ class HybridASR(SpeechRecognizer):
                     self._local_asr = SherpaWhisperASR(self.config.sherpa)
                 else:
                     self._local_asr = FasterWhisperASR(self.config.asr)
+                self._local_asr.set_wind_settings(self.get_wind_settings())
                 self.local_engine_name = self._local_asr.name
                 return
             except Exception as e:
@@ -125,7 +132,10 @@ class HybridASR(SpeechRecognizer):
 
         # 1. If Online Mode is requested and not simulating offline tunnel:
         if not self.simulate_offline:
-            cloud_res = self._call_cloud_asr(audio, sample_rate)
+            # Local ASR applies preprocessing inside its engine.  The cloud path
+            # bypasses that code, so clean the same way before uploading it.
+            cloud_audio = self.preprocess_audio(audio) if sample_rate == TARGET_SR else audio
+            cloud_res = self._call_cloud_asr(cloud_audio, sample_rate)
             if cloud_res and cloud_res.text:
                 cloud_res.raw_detected_language = "cloud_api"
                 return cloud_res

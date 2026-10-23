@@ -97,6 +97,40 @@ python -m bhashadrive.training.train_command_llm --convert-script <llama.cpp>/co
 python -m bhashadrive.evaluation.eval_command_llm                                 # reports/command_llm_eval.json
 ```
 
+### Wind-noise suppression
+
+Uploaded microphone audio is passed through a conservative, single-channel wind
+filter before ASR. It applies a soft adaptive low-frequency attenuation, so speech
+is preserved better than with a fixed aggressive high-pass filter. Browser capture
+also requests the platform noise suppressor and disables automatic gain control so
+quiet wind is not amplified before the server receives it.
+
+The filter is enabled by default. Tune it with environment variables:
+
+```text
+BD_WIND_SUPPRESSION_STRENGTH=0.75   # 0 disables the custom filter; 1 is strongest
+BD_WIND_SUPPRESSION_MAX_DB=18       # maximum low-frequency attenuation
+```
+
+To inspect a recording manually and write the exact preprocessed signal used by
+ASR:
+
+```bash
+python scripts/filter_wind.py input.webm recordings/input_wind_filtered.wav
+```
+
+The command prints the estimated wind score and writes a 16 kHz WAV file for
+listening or comparison. The filter unit tests use deterministic speech-plus-wind
+signals; real validation should also use recordings from the target microphone,
+windscreen, cabin, and airflow directions.
+
+The running API exposes `GET /api/wind-settings` and `POST /api/wind-settings`,
+which the cockpit Settings menu uses for live changes. `POST /api/wind-test`
+accepts one recorded utterance, adds deterministic synthetic low-frequency wind,
+and returns three ASR results: clean audio, noisy audio with the custom filter
+off, and the same noisy audio with the current filter settings. This makes an
+A/B test possible without saving the recording on the server.
+
 ## BharatConnect (driver ↔ passenger voice translation)
 
 Two-way push-to-talk translation in the cockpit (top bar → **BharatConnect**): the driver speaks, the

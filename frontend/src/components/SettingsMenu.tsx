@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Layers, Maximize, MessageSquareText, Settings } from 'lucide-react';
+import { FlaskConical, Layers, Maximize, MessageSquareText, Settings, Wind } from 'lucide-react';
+import type { WindSettings, WindTestResult } from '../lib/backend';
 
 interface Props {
   /** Connection line, e.g. "BhashaDrive NLU · English · हिन्दी · Hinglish"; `detail` goes in its tooltip. */
@@ -15,6 +16,19 @@ interface Props {
   onNextScene: () => void;
   showLog: boolean;
   onLog: (v: boolean) => void;
+  windSettings: WindSettings | null;
+  windSaving: boolean;
+  onWindSettings: (patch: Partial<WindSettings>) => void;
+  browserNoiseSuppression: boolean;
+  onBrowserNoiseSuppression: (v: boolean) => void;
+  autoGainControl: boolean;
+  onAutoGainControl: (v: boolean) => void;
+  windTestLevelDb: number;
+  onWindTestLevelDb: (v: number) => void;
+  windTestBusy: boolean;
+  windTestError: string | null;
+  windTestResult: WindTestResult | null;
+  onWindTest: () => void;
 }
 
 /** Everything the driver rarely touches, behind one button: language, voice replies, scene, log, debug. */
@@ -43,12 +57,53 @@ export function SettingsMenu(p: Props) {
           <Row label="Voice replies">
             <Segmented value={p.tts ? 'on' : 'off'} onChange={(v) => p.onTts(v === 'on')} options={[['on', 'On'], ['off', 'Off']]} />
           </Row>
-          {p.asr && (
+           {p.asr && (
             <Row label="Speech recogniser">
               <Segmented value={p.asr} onChange={p.onAsr} options={[['browser', 'Web'], ['server', 'Server']]} />
             </Row>
-          )}
-          <hr />
+           )}
+           <hr />
+           <div className="settings-heading"><Wind /><span>Wind suppression</span>{p.windSaving && <small>Saving…</small>}</div>
+           {p.windSettings ? (
+             <>
+               <Row label="Custom filter">
+                 <Segmented value={p.windSettings.enabled ? 'on' : 'off'}
+                   onChange={(v) => p.onWindSettings({ enabled: v === 'on' })}
+                   options={[['on', 'On'], ['off', 'Off']]} />
+               </Row>
+               <RangeRow label="Strength" value={p.windSettings.strength} min={0} max={1} step={0.05}
+                 display={`${Math.round(p.windSettings.strength * 100)}%`}
+                 onChange={(v) => p.onWindSettings({ strength: v })} />
+               <RangeRow label="Max reduction" value={p.windSettings.max_attenuation_db} min={0} max={36} step={1}
+                 display={`${Math.round(p.windSettings.max_attenuation_db)} dB`}
+                 onChange={(v) => p.onWindSettings({ max_attenuation_db: v })} />
+             </>
+           ) : <p className="settings-note">Connect the server to change the custom filter.</p>}
+           <Row label="Browser noise suppression">
+             <Segmented value={p.browserNoiseSuppression ? 'on' : 'off'}
+               onChange={(v) => p.onBrowserNoiseSuppression(v === 'on')}
+               options={[['on', 'On'], ['off', 'Off']]} />
+           </Row>
+           <Row label="Browser auto gain">
+             <Segmented value={p.autoGainControl ? 'on' : 'off'}
+               onChange={(v) => p.onAutoGainControl(v === 'on')}
+               options={[['on', 'On'], ['off', 'Off']]} />
+           </Row>
+           <p className="settings-note">The custom filter applies to Server ASR. Browser controls affect microphone capture.</p>
+           <div className="wind-test">
+             <div className="settings-heading"><FlaskConical /><span>Wind test</span></div>
+             <p className="settings-note">Record one short command, then compare clean ASR with synthetic wind before and after suppression.</p>
+             <RangeRow label="Test wind" value={p.windTestLevelDb} min={-6} max={12} step={1}
+               display={`${p.windTestLevelDb > 0 ? '+' : ''}${p.windTestLevelDb} dB`}
+               onChange={p.onWindTestLevelDb} />
+             <button className="wind-test-button" type="button" onClick={p.onWindTest} disabled={p.windTestBusy || !p.windSettings}>
+               <FlaskConical />
+               {p.windTestBusy ? 'Recording / testing…' : 'Record & compare ASR'}
+             </button>
+             {p.windTestError && <p className="wind-test-error">{p.windTestError}</p>}
+             {p.windTestResult && <WindTestResults result={p.windTestResult} />}
+           </div>
+           <hr />
           <button className="settings-item" onClick={p.onNextScene}><Layers /><span>Scene</span><em>{p.sceneLabel}</em></button>
           <button className="settings-item" onClick={() => p.onLog(!p.showLog)}>
             <MessageSquareText /><span>Conversation log</span><em>{p.showLog ? 'Shown' : 'with intents'}</em>
@@ -67,6 +122,43 @@ export function SettingsMenu(p: Props) {
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return <div className="settings-row"><span>{label}</span>{children}</div>;
+}
+
+function RangeRow({ label, value, min, max, step, display, onChange }: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  display: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="settings-range">
+      <span>{label}</span>
+      <input type="range" value={value} min={min} max={max} step={step}
+        onChange={(e) => onChange(Number(e.target.value))} />
+      <em>{display}</em>
+    </label>
+  );
+}
+
+function WindTestResults({ result }: { result: WindTestResult }) {
+  const rows = [
+    ['Clean recording', result.clean],
+    ['Wind, filter off', result.noisy_without_suppression],
+    ['Wind, filter on', result.noisy_with_suppression],
+  ] as const;
+  return (
+    <div className="wind-test-results">
+      {rows.map(([label, variant]) => (
+        <div className="wind-test-result" key={label}>
+          <small>{label}</small>
+          <span className={variant.status === 'ok' ? '' : 'muted'}>{variant.text || variant.error || variant.status}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function Segmented<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: [T, string][] }) {

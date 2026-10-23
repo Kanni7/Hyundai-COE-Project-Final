@@ -46,7 +46,7 @@ COMMANDS: dict[str, list[tuple[str, dict, bool]]] = {
     "seat.vent": [("target", _ZONE, True), ("level", _int(0, 3), False), ("delta", _int(-3, 3), False)],
     "nav.start": [("destination", {"type": "string", "minLength": 1, "maxLength": 60}, True)],
     "nav.stop": [],
-    "profile": [("id", {"enum": ["priya", "meera", "rohan", "aarav"]}, False)],
+    "profile": [("id", {"type": "string", "minLength": 1}, False)],
     "phone.call": [("contact", {"type": "string", "minLength": 1, "maxLength": 40}, True)],
     "phone.end": [],
     "drive.mode": [("mode", {"enum": ["eco", "normal", "sport"]}, True)],

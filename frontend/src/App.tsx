@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Armchair, Car, ChevronDown, Fingerprint, Gauge, Languages, Monitor, Play, Square } from 'lucide-react';
+import { Armchair, Car, ChevronDown, Fingerprint, Gauge, Languages, Monitor, Play, Plus, Square, Trash2 } from 'lucide-react';
 import type { CarState, ChatMessage, Intent, ProfileId, Toast } from './types';
 import { SCENES } from './scenes';
 import { getTimeGreeting, initialCar, runIntents } from './state/car';
@@ -7,7 +7,7 @@ import { parseCommand, type NluContext, type ParseResult } from './nlu/parser';
 import { carAudio } from './lib/audio';
 import { engine } from './lib/engine';
 import { speak, useSpeechRecognition } from './lib/speech';
-import { BACKEND_DOMAIN, backend, recordAudio, toIntent, type BackendHealth, type SpeakerStatus, type Transcription } from './lib/backend';
+import { BACKEND_DOMAIN, backend, recordAudio, toIntent, type BackendHealth, type SpeakerStatus, type Transcription, type WindSettings, type WindTestResult } from './lib/backend';
 import { suggestionsFor } from './lib/intents';
 import { Cockpit, type CockpitView } from './components/Cockpit';
 import type { VoicePhase } from './components/Infotainment';
@@ -16,7 +16,8 @@ import { SettingsMenu } from './components/SettingsMenu';
 import { BharatConnect } from './components/BharatConnect';
 import { Transcript } from './components/Transcript';
 import { SeatView } from './components/SeatView';
-import { PROFILE_IDS, PROFILES } from './lib/profiles';
+import { PROFILES, removeProfile, useProfileIds, useProfiles } from './lib/profiles';
+import { AddProfileModal } from './components/AddProfileModal';
 
 const VIEWS = [['cabin', 'Cabin', Car], ['dash', 'Dashboard', Gauge], ['screen', 'Screen', Monitor], ['seats', 'Seats', Armchair]] as const;
 const NEXT_VIEW = { cabin: 'dash', dash: 'screen', screen: 'seats', seats: 'cabin' } as const;
@@ -161,6 +162,15 @@ export default function App() {
   const [asrError, setAsrError] = useState<string | null>(null);
   const [speechLang, setSpeechLang] = useState<'en-IN' | 'hi-IN'>('en-IN');
   const [tts, setTts] = useState(true);
+  const [windSettings, setWindSettings] = useState<WindSettings | null>(null);
+  const windSettingsRef = useRef<WindSettings | null>(null);
+  const [windSaving, setWindSaving] = useState(false);
+  const [browserNoiseSuppression, setBrowserNoiseSuppression] = useState(true);
+  const [autoGainControl, setAutoGainControl] = useState(false);
+  const [windTestLevelDb, setWindTestLevelDb] = useState(6);
+  const [windTestBusy, setWindTestBusy] = useState(false);
+  const [windTestError, setWindTestError] = useState<string | null>(null);
+  const [windTestResult, setWindTestResult] = useState<WindTestResult | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [demo, setDemo] = useState<number | null>(null);
   const [view, setView] = useState<CockpitView>('cabin');
@@ -171,6 +181,12 @@ export default function App() {
   const [speakerStatus, setSpeakerStatus] = useState<SpeakerStatus | null>(null);
   const hasEnrolledSpeakers = !!speakerStatus && Object.values(speakerStatus.enrolled).some((n) => (n ?? 0) > 0);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  const [addProfileOpen, setAddProfileOpen] = useState(false);
+
+  const profileIds = useProfileIds();
+
+  const profiles = useProfiles();
 
   const refreshSpeakers = useCallback(() => {
     backend.speakers().then(setSpeakerStatus, () => setSpeakerStatus(null));
@@ -193,6 +209,7 @@ export default function App() {
 
   const ttsRef = useRef(tts);
   useEffect(() => { ttsRef.current = tts; }, [tts]);
+  useEffect(() => { windSettingsRef.current = windSettings; }, [windSettings]);
 
   const commit = useCallback((next: CarState) => {
     carRef.current = next;
@@ -208,23 +225,37 @@ export default function App() {
     const started = Date.now();
     const parsed = parseCommand(text, nlu.current);
     let greeting = '';
-    if (speaker && !parsed.intents.some((i) => i.type === 'profile')) {
-      if (speaker !== carRef.current.profile) {
-        const sw = runIntents(carRef.current, [{ type: 'profile', id: speaker }], parsed.lang, { speed: engine.speed });
-        if (sw.state.profile === speaker) { // not refused (moving car)
-          commit(sw.state);
-          if (sw.toast) setToast({ ...sw.toast, id: nextId++ });
-          const name = PROFILES[speaker].name;
-          greeting = parsed.lang === 'hi' ? `Namaste ${name}, seat aapke hisaab se set. ` : `Hi ${name}, I've set your seat. `;
+    if (via === 'voice' && !parsed.intents.some((i) => i.type === 'profile')) {
+      if (speaker) {
+        if (speaker !== carRef.current.profile) {
+          const sw = runIntents(carRef.current, [{ type: 'profile', id: speaker }], parsed.lang, { speed: engine.speed });
+          if (sw.state.profile === speaker) { // not refused (moving car)
+            commit(sw.state);
+            if (sw.toast) setToast({ ...sw.toast, id: nextId++ });
+            const name = profiles[speaker]?.name || PROFILES[speaker]?.name || speaker;
+            greeting = parsed.lang === 'hi' ? `Namaste ${name}, seat aapke hisaab se set. ` : `Hi ${name}, I've set your seat. `;
+          }
+        } else {
+          // Speaker matched current profile: show confirmation toast so driver knows their voice was recognized
+          setToast({
+            id: nextId++,
+            icon: 'seat',
+            label: `Driver: ${profiles[speaker]?.name || PROFILES[speaker]?.name || speaker}`,
+            value: 'Voice recognized',
+          });
         }
       } else {
-        // Speaker matched current profile: show confirmation toast so driver knows their voice was recognized
-        setToast({
-          id: nextId++,
-          icon: 'seat',
-          label: `Driver: ${PROFILES[speaker].name}`,
-          value: 'Voice recognized',
-        });
+        // Unrecognized voice: fallback to default profile if not already default
+        if (carRef.current.profile !== 'default') {
+          const sw = runIntents(carRef.current, [{ type: 'profile', id: 'default' }], parsed.lang, { speed: engine.speed });
+          if (sw.state.profile === 'default') {
+            commit(sw.state);
+            if (sw.toast) setToast({ ...sw.toast, id: nextId++ });
+            greeting = parsed.lang === 'hi'
+              ? 'Aapki aawaz pehchaan nahi paaye, default profile set kar di hai. '
+              : 'Voice not recognized. Switched to Default profile. ';
+          }
+        }
       }
     }
     nlu.current = parsed.context;
@@ -272,6 +303,10 @@ export default function App() {
     const check = () => backend.health()
       .then((h) => {
         setServer(h);
+        void backend.windSettings().then((settings) => {
+          windSettingsRef.current = settings;
+          setWindSettings(settings);
+        }).catch(() => setWindSettings(null));
         if (first) { first = false; void backend.reset().catch(() => {}); }
       })
       .catch(() => setServer(null));
@@ -298,20 +333,15 @@ export default function App() {
       const g = getTimeGreeting();
       const modeLabel = out.state.ignition === 'on' ? 'Engine started' : 'Electronics on';
       const welcomeText = `${g.en}! ${modeLabel}.`;
-      setReply({ text: welcomeText, intents: [{ type: 'greet' }], understood: true, asks: true, confirm: false });
+      setReply({ text: welcomeText, intents: [{ type: 'greet' }], understood: true, asks: false, confirm: false });
       setMessages((m) => [...m, { id: nextId++, role: 'car', text: welcomeText }]);
       carAudio.chime('ok');
       if (ttsRef.current && 'speechSynthesis' in window) {
         speak(
           welcomeText,
           () => { setPhase('speaking'); carAudio.duck(true); },
-          () => {
-            setPhase('idle');
-            carAudio.duck(false);
-            window.setTimeout(() => {
-              if (listenForAnswer.current) listenForAnswer.current();
-            }, 300);
-          }
+          // A greeting, not a question: the mic stays closed.
+          () => { setPhase('idle'); carAudio.duck(false); },
         );
       }
     }
@@ -323,12 +353,59 @@ export default function App() {
   const useServerAsr = serverAsr && (asrMode === 'server' || !speech.supported || hasEnrolledSpeakers);
   const micSupported = speech.supported || serverAsr;
 
+  const changeWindSettings = useCallback((patch: Partial<WindSettings>) => {
+    const current = windSettingsRef.current;
+    if (!current) return;
+    const next = { ...current, ...patch };
+    windSettingsRef.current = next;
+    setWindSettings(next);
+    setWindSaving(true);
+    void backend.updateWindSettings(next)
+      .then((saved) => {
+        windSettingsRef.current = saved;
+        setWindSettings(saved);
+      })
+      .catch(() => setWindTestError('Could not save wind settings'))
+      .finally(() => setWindSaving(false));
+  }, []);
+
+  const runWindTest = useCallback(async () => {
+    if (windTestBusy) return;
+    if (!useServerAsr || !windSettings) {
+      setWindTestError('Select Server ASR and make sure the backend is connected');
+      return;
+    }
+    if (recording || speech.listening || teachingVoice) {
+      setWindTestError('Stop the current microphone activity before starting the wind test');
+      return;
+    }
+    try {
+      setWindTestBusy(true);
+      setWindTestError(null);
+      setWindTestResult(null);
+      setToast({ id: nextId++, icon: 'fan', label: 'Wind test', value: 'Speak one short command' });
+      // Capture the clean reference without browser suppression. The backend
+      // then adds deterministic synthetic wind and runs three ASR passes.
+      const rec = await recordAudio(10000, 1200, { noiseSuppression: false, autoGainControl: false });
+      const audio = await rec.done;
+      setPhase('thinking');
+      const result = await backend.windTest(audio, windTestLevelDb);
+      setWindTestResult(result);
+      setPhase('idle');
+    } catch (err) {
+      setPhase('idle');
+      setWindTestError(err instanceof Error ? err.message : 'Wind test failed');
+    } finally {
+      setWindTestBusy(false);
+    }
+  }, [recording, speech.listening, teachingVoice, useServerAsr, windSettings, windTestBusy, windTestLevelDb]);
+
   // Server speech recognition: record in the browser, transcribe on the backend (Whisper).
   const toggleServerMic = useCallback(async () => {
     if (recording) { void recording.stop(); return; } // the `done` handler below transcribes
     try {
       setAsrError(null);
-      const r = await recordAudio();
+      const r = await recordAudio(8000, 900, { noiseSuppression: browserNoiseSuppression, autoGainControl });
       setRecording(r);
       // Ends on the mic button, on a pause after speech, or at the length limit.
       void r.done.then(async (audio) => {
@@ -347,7 +424,7 @@ export default function App() {
     } catch {
       setAsrError('Microphone permission denied');
     }
-  }, [recording, handleCommand]);
+  }, [recording, handleCommand, browserNoiseSuppression, autoGainControl]);
 
   // Teach the car the active driver's voice from the topbar button.
   const toggleTeachVoice = useCallback(async () => {
@@ -362,7 +439,17 @@ export default function App() {
     }
 
     const activeProfile = carRef.current.profile;
-    const profileName = PROFILES[activeProfile].name;
+    if (activeProfile === 'default') {
+      setToast({
+        id: nextId++,
+        icon: 'seat',
+        label: 'Default Profile',
+        value: 'Please create a driver profile to teach voice',
+      });
+      setAddProfileOpen(true);
+      return;
+    }
+    const profileName = (profiles[activeProfile] ?? PROFILES[activeProfile]).name;
 
     try {
       setTeachingVoice(true);
@@ -374,55 +461,32 @@ export default function App() {
         value: 'Speak to teach voice',
       });
 
-      const rec = await recordAudio(9000, 1400);
+      const rec = await recordAudio(9000, 1400, { noiseSuppression: browserNoiseSuppression, autoGainControl });
       teachingRecRef.current = rec;
 
       const audio = await rec.done;
       teachingRecRef.current = null;
       setPhase('thinking');
 
-      // Enroll voice embedding in CAM++ and transcribe what was said concurrently
-      const [enrollRes, transcribeRes] = await Promise.allSettled([
-        backend.enroll(activeProfile, audio),
-        backend.transcribe(audio),
-      ]);
-
-      if (enrollRes.status === 'rejected') {
-        throw enrollRes.reason;
-      }
-
+      // Enroll voice embedding in CAM++ only (do NOT execute what was spoken - this is strictly training)
+      const res = await backend.enroll(activeProfile, audio);
       refreshSpeakers();
-      const samples = enrollRes.value.samples;
+      const samples = res.samples;
 
-      let spokenText = '';
-      if (transcribeRes.status === 'fulfilled' && transcribeRes.value.text?.trim()) {
-        spokenText = bestTranscript(transcribeRes.value, nlu.current);
-      }
-
-      if (spokenText) {
-        setToast({
-          id: nextId++,
-          icon: 'seat',
-          label: `Voice Learned: ${profileName}`,
-          value: `Executing: “${spokenText}”`,
-        });
-        handleCommand(spokenText, 'voice', activeProfile);
+      const replyMsg = `Voice learned for ${profileName}. Sample ${samples} saved.`;
+      setMessages((m) => [...m, { id: nextId++, role: 'car', text: replyMsg }]);
+      setReply({ text: replyMsg, intents: [], understood: true, asks: false, confirm: false });
+      setToast({
+        id: nextId++,
+        icon: 'seat',
+        label: `Voice Learned: ${profileName}`,
+        value: `${samples} sample${samples > 1 ? 's' : ''} stored (not executed)`,
+      });
+      carAudio.chime('ok');
+      if (ttsRef.current && 'speechSynthesis' in window) {
+        speak(replyMsg, () => { setPhase('speaking'); carAudio.duck(true); }, () => { setPhase('idle'); carAudio.duck(false); });
       } else {
-        const replyMsg = `Namaste ${profileName}! I've learned your voice. From now on, whenever you give a voice command, the car will recognize you, adjust your seat, and set your preferences automatically.`;
-        setMessages((m) => [...m, { id: nextId++, role: 'car', text: replyMsg }]);
-        setReply({ text: replyMsg, intents: [], understood: true, asks: false, confirm: false });
-        setToast({
-          id: nextId++,
-          icon: 'seat',
-          label: `Voice Learned: ${profileName}`,
-          value: `${samples} voiceprint${samples > 1 ? 's' : ''} saved`,
-        });
-        carAudio.chime('ok');
-        if (ttsRef.current && 'speechSynthesis' in window) {
-          speak(replyMsg, () => { setPhase('speaking'); carAudio.duck(true); }, () => { setPhase('idle'); carAudio.duck(false); });
-        } else {
-          setPhase('idle');
-        }
+        setPhase('idle');
       }
     } catch (err) {
       teachingRecRef.current = null;
@@ -439,7 +503,7 @@ export default function App() {
     } finally {
       setTeachingVoice(false);
     }
-  }, [handleCommand, refreshSpeakers]);
+  }, [handleCommand, refreshSpeakers, browserNoiseSuppression, autoGainControl]);
 
   // Chrome's recogniser streams audio to Google; when that fails ("network"), carry on with the
   // backend's Whisper for the rest of the session and keep listening, so the driver need not repeat the tap.
@@ -454,6 +518,7 @@ export default function App() {
 
   const toggleMic = useCallback(() => {
     carAudio.unlock();
+    if (windTestBusy) return;
     if (useServerAsr) {
       if (!recording) { window.speechSynthesis?.cancel(); carAudio.chime('listen'); }
       void toggleServerMic();
@@ -463,7 +528,7 @@ export default function App() {
     window.speechSynthesis?.cancel();
     carAudio.chime('listen');
     speech.start(speechLang);
-  }, [speech, speechLang, useServerAsr, recording, toggleServerMic]);
+  }, [speech, speechLang, useServerAsr, recording, toggleServerMic, windTestBusy]);
 
   useEffect(() => {
     listenForAnswer.current = () => { if (micSupported && !recording && !speech.listening) toggleMic(); };
@@ -565,6 +630,24 @@ export default function App() {
           <span className="brand-sub">Smart Cockpit <i>·</i> Voice AI</span>
         </div>
         <div className="top-actions">
+          {/* Engine Start / Stop Button */}
+          <button
+            className={`topbar-engine-btn ${car.ignition}`}
+            onClick={() => handleIntent({
+              type: 'ignition',
+              mode: engine.brakeHeld && car.ignition !== 'on' ? 'on' : (car.ignition === 'off' ? 'acc' : car.ignition === 'acc' ? 'on' : 'off')
+            })}
+            title={`Ignition: ${car.ignition.toUpperCase()} (Click to toggle: OFF -> ACC -> ON -> OFF)`}
+            aria-label="Engine Start Stop"
+          >
+            <span className="engine-ring-indicator" />
+            <span className="engine-label">
+              <span className="engine-title">ENGINE</span>
+              <span className="engine-sub">START · STOP</span>
+            </span>
+            <span className="engine-status-badge">{car.ignition.toUpperCase()}</span>
+          </button>
+
           <button className={demo !== null ? 'on' : ''} onClick={() => { carAudio.unlock(); setDemo(demo === null ? 0 : null); }}
             title="Run a guided demo">{demo !== null ? <Square /> : <Play />}<span>{demo !== null ? 'Stop demo' : 'Demo'}</span></button>
           <div className="views" role="radiogroup" aria-label="Camera view (Z)">
@@ -609,32 +692,70 @@ export default function App() {
             </button>
             {showProfileMenu && (
               <div className="teach-profile-dropdown" role="menu">
-                <div className="teach-dropdown-header">Select Profile to Teach:</div>
-                {PROFILE_IDS.map((id) => {
-                  const prof = PROFILES[id];
+                <div className="teach-dropdown-header">Driver Profiles:</div>
+                {profileIds.map((id) => {
+                  const prof = profiles[id] ?? PROFILES[id];
                   const count = speakerStatus?.enrolled[id] ?? 0;
                   const isActive = id === car.profile;
+                  const isDefault = id === 'default';
                   return (
-                    <button
-                      key={id}
-                      role="menuitem"
-                      className={`teach-dropdown-item ${isActive ? 'active' : ''}`}
-                      onClick={() => {
-                        handleIntent({ type: 'profile', id });
-                        setShowProfileMenu(false);
-                      }}
-                    >
-                      <span className="prof-avatar" style={{ background: prof.accent }}>{prof.name[0]}</span>
-                      <div className="prof-meta">
-                        <span className="prof-name">{prof.name}</span>
-                        <span className="prof-height">{prof.heightCm} cm · {prof.build}</span>
-                      </div>
-                      <span className={`prof-enroll-tag ${count > 0 ? 'enrolled' : ''}`}>
-                        {count > 0 ? `${count} saved` : 'No voice'}
-                      </span>
-                    </button>
+                    <div key={id} className="teach-dropdown-item-row">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={`teach-dropdown-item ${isActive ? 'active' : ''}`}
+                        onClick={() => {
+                          handleIntent({ type: 'profile', id });
+                          setShowProfileMenu(false);
+                        }}
+                      >
+                        <span className="prof-avatar" style={{ background: prof.accent }}>{prof.name[0]}</span>
+                        <div className="prof-meta">
+                          <span className="prof-name">
+                            {prof.name}
+                            {isDefault && <span className="default-pill">Default</span>}
+                          </span>
+                          <span className="prof-height">{prof.heightCm} cm · {prof.build}</span>
+                        </div>
+                        {!isDefault && (
+                          <span className={`prof-enroll-tag ${count > 0 ? 'enrolled' : ''}`}>
+                            {count > 0 ? `${count} voice` : 'No voice'}
+                          </span>
+                        )}
+                      </button>
+                      {!isDefault && (
+                        <button
+                          type="button"
+                          className="prof-delete-btn"
+                          title={`Delete ${prof.name}'s profile`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm(`Delete driver profile "${prof.name}"?`)) {
+                              removeProfile(id);
+                              backend.forget(id).catch(() => {});
+                              if (car.profile === id) {
+                                handleIntent({ type: 'profile', id: 'default' });
+                              }
+                            }
+                          }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
+                <button
+                  type="button"
+                  className="teach-dropdown-add-btn"
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setAddProfileOpen(true);
+                  }}
+                >
+                  <Plus size={14} />
+                  <span>Add New Profile</span>
+                </button>
               </div>
             )}
           </div>
@@ -643,9 +764,14 @@ export default function App() {
             <Languages /><span>BharatConnect</span></button>
           <SettingsMenu status={status} speechLang={speechLang} onLang={setSpeechLang}
             tts={tts} onTts={(v) => { setTts(v); if (!v) window.speechSynthesis?.cancel(); }}
-            asr={serverAsr && speech.supported ? asrMode : undefined} onAsr={setAsrMode}
-            sceneLabel={SCENE_LABEL[car.scene]} onNextScene={() => handleIntent({ type: 'scene', scene: NEXT_SCENE[car.scene] })}
-            showLog={showLog} onLog={setShowLog} />
+             asr={serverAsr && speech.supported ? asrMode : undefined} onAsr={setAsrMode}
+             sceneLabel={SCENE_LABEL[car.scene]} onNextScene={() => handleIntent({ type: 'scene', scene: NEXT_SCENE[car.scene] })}
+             showLog={showLog} onLog={setShowLog}
+             windSettings={windSettings} windSaving={windSaving} onWindSettings={changeWindSettings}
+             browserNoiseSuppression={browserNoiseSuppression} onBrowserNoiseSuppression={setBrowserNoiseSuppression}
+             autoGainControl={autoGainControl} onAutoGainControl={setAutoGainControl}
+             windTestLevelDb={windTestLevelDb} onWindTestLevelDb={setWindTestLevelDb}
+             windTestBusy={windTestBusy} windTestError={windTestError} windTestResult={windTestResult} onWindTest={() => void runWindTest()} />
         </div>
       </header>
 
@@ -654,6 +780,21 @@ export default function App() {
       {bharatOpen && <BharatConnect onClose={() => setBharatOpen(false)} />}
 
       {showLog && <Transcript messages={messages} onClose={() => setShowLog(false)} onClear={() => setMessages([])} />}
+
+      <AddProfileModal
+        isOpen={addProfileOpen}
+        onClose={() => setAddProfileOpen(false)}
+        onProfileCreated={(np) => handleIntent({ type: 'profile', id: np.id })}
+      />
+      <AddProfileModal
+
+        isOpen={addProfileOpen}
+
+        onClose={() => setAddProfileOpen(false)}
+
+        onProfileCreated={(np) => handleIntent({ type: 'profile', id: np.id })}
+
+      />
 
       <VoiceDock phase={livePhase} interim={speech.interim} heard={heard} reply={reply} error={speech.error ?? asrError}
         suggestions={suggestionsFor(reply?.intents ?? [], !!reply?.confirm)} supported={micSupported}

@@ -6,7 +6,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { CarState, Intent, ProfileId } from '../types';
 import { backend, recordAudio, type SpeakerStatus } from '../lib/backend';
-import { body, CABIN, fitFor, PROFILE_IDS, PROFILES, type Fit } from '../lib/profiles';
+import { body, CABIN, fitFor, PROFILES, type Fit, useProfileIds, useProfiles } from '../lib/profiles';
+import { AddProfileModal } from './AddProfileModal';
 
 type Pt = [number, number];
 const RAD = Math.PI / 180;
@@ -66,6 +67,14 @@ function VoiceId({ profile, name }: { profile: ProfileId; name: string }) {
 
   if (status === undefined) return null;
   if (!status?.ready) return <div className="voice-id"><small>Voice ID</small><p>Needs the backend with its speaker model.</p></div>;
+  if (profile === 'default') {
+    return (
+      <div className="voice-id">
+        <small>Voice ID</small>
+        <p>Default profile is for guests. Add a driver profile to save personalized seat and voice recognition.</p>
+      </div>
+    );
+  }
   const n = status.enrolled[profile] ?? 0;
 
   const record = async () => {
@@ -114,7 +123,10 @@ const DASH_PEAK: Pt = [6, 86];
 const ROAD_Y = -20; // road surface below the cabin floor
 
 export function SeatView({ car, onIntent }: { car: CarState; onIntent: (i: Intent) => void }) {
-  const p = PROFILES[car.profile];
+  const profileIds = useProfileIds();
+  const profiles = useProfiles();
+  const [showAddModal, setShowAddModal] = useState(false);
+  const p = profiles[car.profile] ?? PROFILES[car.profile];
   const target = useMemo(() => fitFor(p), [p]);
   const f = useTween(target);
   const b = body(f.heightCm);
@@ -207,8 +219,8 @@ export function SeatView({ car, onIntent }: { car: CarState; onIntent: (i: Inten
           {stats.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
         </dl>
         <div className="seat-profiles" role="radiogroup" aria-label="Driver profile">
-          {PROFILE_IDS.map((id) => {
-            const q = PROFILES[id];
+          {profileIds.map((id) => {
+            const q = profiles[id] ?? PROFILES[id];
             return (
               <button key={id} role="radio" aria-checked={id === car.profile} className={id === car.profile ? 'on' : ''}
                 style={{ '--pc': q.accent } as CSSProperties} onClick={() => onIntent({ type: 'profile', id })}>
@@ -216,8 +228,12 @@ export function SeatView({ car, onIntent }: { car: CarState; onIntent: (i: Inten
               </button>
             );
           })}
+          <button type="button" className="seat-add-btn" onClick={() => setShowAddModal(true)} title="Add new driver profile">
+            <i>+</i><b>Add Profile</b><span>Personalized</span>
+          </button>
         </div>
-        <p className="seat-hint">Or say “Priya ka profile lagao” / “switch to Aarav”.</p>
+        <p className="seat-hint">Speak any command to auto-detect your profile, or pick above.</p>
+        <AddProfileModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onProfileCreated={(np) => onIntent({ type: 'profile', id: np.id })} />
         <VoiceId key={car.profile} profile={car.profile} name={p.name} />
       </aside>
     </section>

@@ -10,6 +10,7 @@ export const API = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api
 const TIMEOUT_MS = 4000;
 const TRANSCRIBE_TIMEOUT_MS = 30000; // CPU speech recognition takes a few seconds per utterance
 const INTERPRET_TIMEOUT_MS = 8000; // the command LLM: ~0.3-1 s on a laptop CPU
+const WIND_TEST_TIMEOUT_MS = 90000; // the wind test performs three ASR passes
 
 export interface BackendHealth {
   nlu: string;
@@ -56,6 +57,28 @@ export interface SpeakerStatus {
   enrolled: Partial<Record<ProfileId, number>>;
 }
 
+export interface WindSettings {
+  enabled: boolean;
+  strength: number;
+  max_attenuation_db: number;
+}
+
+export interface WindTestVariant {
+  text: string;
+  status: string;
+  error: string | null;
+  language: string | null;
+  latency_s: number | null;
+}
+
+export interface WindTestResult {
+  wind_level_db: number;
+  settings: WindSettings;
+  clean: WindTestVariant;
+  noisy_without_suppression: WindTestVariant;
+  noisy_with_suppression: WindTestVariant;
+}
+
 async function call<T>(path: string, init?: RequestInit, timeoutMs = TIMEOUT_MS): Promise<T> {
   const ctrl = new AbortController();
   const t = window.setTimeout(() => ctrl.abort(), timeoutMs);
@@ -71,6 +94,13 @@ async function call<T>(path: string, init?: RequestInit, timeoutMs = TIMEOUT_MS)
 export const backend = {
   health: () => call<BackendHealth>('/health'),
   reset: () => call<{ ok: boolean }>('/reset', { method: 'POST' }),
+  windSettings: () => call<WindSettings>('/wind-settings'),
+  updateWindSettings: (settings: WindSettings) =>
+    call<WindSettings>('/wind-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    }),
   text: (text: string) =>
     call<BackendResult>('/text', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }),
   /** Any sentence -> cockpit commands, by the command LLM. The backend validates every command. */
@@ -82,6 +112,13 @@ export const backend = {
     const ext = audio.type.includes('mp4') ? 'mp4' : audio.type.includes('ogg') ? 'ogg' : 'webm';
     fd.append('file', audio, `speech.${ext}`);
     return call<Transcription>('/transcribe', { method: 'POST', body: fd }, TRANSCRIBE_TIMEOUT_MS);
+  },
+  windTest: (audio: Blob, windLevelDb = 6) => {
+    const fd = new FormData();
+    const ext = audio.type.includes('mp4') ? 'mp4' : audio.type.includes('ogg') ? 'ogg' : 'webm';
+    fd.append('file', audio, `wind-test.${ext}`);
+    fd.append('wind_level_db', String(windLevelDb));
+    return call<WindTestResult>('/wind-test', { method: 'POST', body: fd }, WIND_TEST_TIMEOUT_MS);
   },
   speakers: () => call<SpeakerStatus>('/speaker'),
   /** Adds one spoken sentence to a profile's voiceprint (the backend keeps only the embedding). */
@@ -136,8 +173,22 @@ const titleCase = (s: string) => s.replace(/\b\p{L}/gu, (ch) => ch.toUpperCase()
  * Records one utterance from the microphone. It ends on `stop()`, after `silenceMs` of quiet
  * once speech was heard (like the browser recogniser does), or at `maxMs`.
  */
-export async function recordAudio(maxMs = 8000, silenceMs = 900) {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+export interface RecordAudioOptions {
+  noiseSuppression?: boolean;
+  autoGainControl?: boolean;
+}
+
+export async function recordAudio(maxMs = 8000, silenceMs = 900, options: RecordAudioOptions = {}) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: options.noiseSuppression ?? true,
+      // Do not let browser AGC amplify a quiet wind burst before the server's
+      // adaptive low-frequency suppression gets a chance to process it.
+      autoGainControl: options.autoGainControl ?? false,
+      channelCount: 1,
+    },
+  });
   const rec = new MediaRecorder(stream);
   const chunks: Blob[] = [];
   rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };

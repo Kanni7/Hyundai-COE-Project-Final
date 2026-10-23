@@ -62,21 +62,47 @@ export function Cockpit({ car, scene, toast, voice, onIntent, view, onToggleFocu
   const reserveLeft = side ? DOCK_SIDE_WIDTH : 0;
   const reserveBottom = side ? 0 : DOCK_BOTTOM_HEIGHT;
 
-  // Fill the width (in the dashboard view, only the scene's frame columns) and, within MAX_ZOOM, the height
-  // above the dock. Any further side crop is taken around scene.focusX, so that point (the steering wheel) keeps its place.
-  const [x0, x1] = (view === 'dash' && scene.frame) || [0, scene.width];
-  const fit = vp.w / (x1 - x0);
-  let s = Math.min(Math.max(fit, (vp.h - reserveBottom) / scene.height), fit * MAX_ZOOM[side ? 'side' : 'bottom']);
-  let sw = scene.width * s;
-  let sh = scene.height * s;
-  const fx = (scene.focusX * scene.width - x0) / (x1 - x0);
-  let left = -x0 * s - ((x1 - x0) * s - vp.w) * fx;
-  left = sw > vp.w ? Math.min(0, Math.max(vp.w - sw, left)) : (vp.w - sw) / 2;
-  let top = sh > vp.h ? -(sh - vp.h) * 0.4 : 0;
-  // In a short window, lift the cabin (losing some sky, at most 12%) so the console clears the dock.
-  if (scene.keepAboveDock) top = Math.min(top, Math.max(vp.h - reserveBottom - scene.keepAboveDock * s, -sh * 0.12));
-  const cabinBottom = Math.min(vp.h, top + sh);
-  if (view === 'screen') {
+  let s: number;
+  let sw: number;
+  let sh: number;
+  let left: number;
+  let top: number;
+
+  if (view === 'cabin') {
+    // Fill the viewport completely (no blank space around) while keeping all features visible.
+    const fitW = vp.w / scene.width;
+    const fitH = vp.h / scene.height;
+
+    // Use cover scale to completely eliminate any blank space or black bars around the cabin
+    s = Math.max(fitW, fitH);
+    sw = scene.width * s;
+    sh = scene.height * s;
+
+    // Position horizontally:
+    // If the cabin is wider than the viewport, shift so DriverSwitches (Engine Start/Stop at x=1806..1918)
+    // is always completely visible with comfortable breathing room from the right edge.
+    if (sw > vp.w) {
+      const alignRight = vp.w - 1933 * s + 16 * s;
+      left = Math.min(0, alignRight);
+    } else {
+      left = (vp.w - sw) / 2;
+    }
+
+    // Position vertically:
+    // Keep top near 0 so the sky fills behind the topbar, while pedals and console reach the bottom.
+    top = sh > vp.h ? (vp.h - sh) * 0.15 : (vp.h - sh) / 2;
+  } else if (view === 'dash') {
+    const [x0, x1] = scene.frame || [0, scene.width];
+    const fit = vp.w / (x1 - x0);
+    s = Math.min(Math.max(fit, (vp.h - reserveBottom) / scene.height), fit * MAX_ZOOM[side ? 'side' : 'bottom']);
+    sw = scene.width * s;
+    sh = scene.height * s;
+    const fx = (scene.focusX * scene.width - x0) / (x1 - x0);
+    left = -x0 * s - ((x1 - x0) * s - vp.w) * fx;
+    left = sw > vp.w ? Math.min(0, Math.max(vp.w - sw, left)) : (vp.w - sw) / 2;
+    top = sh > vp.h ? -(sh - vp.h) * 0.4 : 0;
+    if (scene.keepAboveDock) top = Math.min(top, Math.max(vp.h - reserveBottom - scene.keepAboveDock * s, -sh * 0.12));
+  } else if (view === 'screen') {
     // Lean in towards the centre stack, like a driver glancing at the screen, centred beside the assistant.
     const [fx0, fy0, fx1, fy1] = scene.focus;
     const room = vp.h - reserveBottom - 90;
@@ -86,7 +112,14 @@ export function Cockpit({ car, scene, toast, voice, onIntent, view, onToggleFocu
     sh = scene.height * s;
     left = reserveLeft + free / 2 - ((fx0 + fx1) / 2) * s;
     top = 70 + room / 2 - ((fy0 + fy1) / 2) * s;
+  } else {
+    s = vp.w / scene.width;
+    sw = scene.width * s;
+    sh = scene.height * s;
+    left = (vp.w - sw) / 2;
+    top = 0;
   }
+  const cabinBottom = Math.min(vp.h, top + sh);
 
   const screenTransform = useMemo(() => quadToMatrix3d(scene.screen.ui.w, scene.screen.ui.h, scene.screen.quad), [scene]);
   const amb = car.ambient;
@@ -158,7 +191,7 @@ export function Cockpit({ car, scene, toast, voice, onIntent, view, onToggleFocu
           )}
         </div>
       </div>
-      <div className="viewport-fade" style={{ top: cabinBottom - 160, opacity: view === 'screen' ? 0 : 1 }} />
+      <div className="viewport-fade" style={{ top: cabinBottom - 160, opacity: (view === 'screen' || view === 'cabin') ? 0 : 1 }} />
     </div>
   );
 }

@@ -8,13 +8,14 @@ import tempfile
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, File, HTTPException, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ..audio.preprocessing import AudioError, decode_file
-from ..audio.speaker_id import PROFILE_IDS, SpeakerID
+from ..audio.preprocessing import AudioError, decode_file, preprocess
+from ..audio.speaker_id import SpeakerID
+from ..audio.wind_suppression import WindSuppressionSettings, default_wind_settings, mix_synthetic_wind
 from ..bharat.api import BharatServices, bharat_router
 from ..config import FRONTEND_DIST, AppConfig
 
@@ -28,6 +29,12 @@ class TextIn(BaseModel):
 
 class ConnectivityIn(BaseModel):
     offline: bool
+
+
+class WindSettingsIn(BaseModel):
+    enabled: bool = True
+    strength: float = Field(default=0.75, ge=0.0, le=1.0)
+    max_attenuation_db: float = Field(default=18.0, ge=0.0, le=36.0)
 
 
 def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = False, mock: bool = False,
@@ -75,6 +82,9 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
                     pipeline.asr = None
     is_v2 = hasattr(pipeline, "model")
     lock = threading.Lock()  # one conversation, processed sequentially
+    wind_settings = default_wind_settings()
+    if pipeline.asr is not None:
+        pipeline.asr.set_wind_settings(wind_settings)
     app = FastAPI(title="BhashaDrive (local prototype)", docs_url="/docs")
     api = APIRouter()
 
@@ -121,6 +131,85 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
         p.write_bytes(data)
         return p, data
 
+    def _wind_payload() -> dict:
+        return {
+            "enabled": wind_settings.enabled,
+            "strength": round(wind_settings.strength, 3),
+            "max_attenuation_db": round(wind_settings.max_attenuation_db, 1),
+        }
+
+    @api.get("/wind-settings")
+    def get_wind_settings():
+        """Current runtime wind suppression settings used by server ASR."""
+        return _wind_payload()
+
+    @api.post("/wind-settings")
+    def update_wind_settings(body: WindSettingsIn):
+        """Update wind suppression without restarting the backend."""
+        nonlocal wind_settings
+        next_settings = WindSuppressionSettings(
+            enabled=body.enabled,
+            strength=body.strength,
+            max_attenuation_db=body.max_attenuation_db,
+        ).normalized()
+        with lock:
+            wind_settings = next_settings
+            if pipeline.asr is not None:
+                pipeline.asr.set_wind_settings(wind_settings)
+        return _wind_payload()
+
+    def _asr_summary(result) -> dict:
+        return {
+            "text": result.text or "",
+            "status": result.status,
+            "error": result.error,
+            "language": result.language,
+            "latency_s": result.latency_s,
+        }
+
+    @api.post("/wind-test")
+    async def wind_test(file: UploadFile = File(...), wind_level_db: float = Form(6.0)):
+        """Compare clean, synthetic-wind, and filtered ASR output for one recording."""
+        asr = pipeline.asr
+        if asr is None:
+            raise HTTPException(503, "Speech recognition not loaded")
+        data = await file.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "Audio too large")
+
+        with tempfile.TemporaryDirectory() as d:
+            suffix = Path(file.filename or "audio.webm").suffix or ".webm"
+            p = Path(d) / f"wind-test{suffix}"
+            p.write_bytes(data)
+            try:
+                clean = decode_file(p)
+            except AudioError as exc:
+                raise HTTPException(400, f"Could not read the recording: {exc}") from exc
+
+        if clean.size == 0:
+            raise HTTPException(400, "The recording was empty")
+        level = max(-12.0, min(18.0, float(wind_level_db)))
+        noisy = mix_synthetic_wind(clean, level_db=level)
+        active = wind_settings
+        disabled = WindSuppressionSettings(enabled=False, strength=active.strength,
+                                           max_attenuation_db=active.max_attenuation_db)
+        with lock:
+            try:
+                asr.set_wind_settings(disabled)
+                clean_result = asr.transcribe_array(clean)
+                noisy_result = asr.transcribe_array(noisy)
+                asr.set_wind_settings(active)
+                filtered_result = asr.transcribe_array(noisy)
+            finally:
+                asr.set_wind_settings(active)
+        return {
+            "wind_level_db": level,
+            "settings": _wind_payload(),
+            "clean": _asr_summary(clean_result),
+            "noisy_without_suppression": _asr_summary(noisy_result),
+            "noisy_with_suppression": _asr_summary(filtered_result),
+        }
+
     @api.post("/transcribe")
     async def transcribe(file: UploadFile = File(...)):
         """Speech to text only. The cockpit routes the transcript itself (backend or local parser).
@@ -139,7 +228,7 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
                 ranked = pipeline.rank_transcripts(*(res.hypotheses or [asr_text])) if is_v2 and asr_text else [asr_text]
                 if asr_text and speaker.ready and speaker.enrolled():
                     try:
-                        who = speaker.identify(decode_file(p))
+                        who = speaker.identify(preprocess(decode_file(p), wind_settings=wind_settings))
                     except Exception as e:  # driver recognition is a bonus: never lose the command over it
                         print(f"[API /transcribe] speaker ID failed: {e}")
         text = ranked[0] if ranked else ""
@@ -149,8 +238,8 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
                 "status": res.status, "error": res.error, "engine": name, "speaker": who}
 
     def _profile(profile: str) -> str:
-        if profile not in PROFILE_IDS:
-            raise HTTPException(404, f"Unknown profile: {profile}")
+        if not profile or len(profile) > 40:
+            raise HTTPException(400, f"Invalid profile id: {profile!r}")
         return profile
 
     @api.get("/speaker")
@@ -171,7 +260,7 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
             p = Path(d) / f"enroll{Path(file.filename or 'a.webm').suffix or '.webm'}"
             p.write_bytes(data)
             try:
-                audio = decode_file(p)
+                audio = preprocess(decode_file(p), wind_settings=wind_settings)
             except AudioError:
                 raise HTTPException(400, "Could not read the recording")
         try:

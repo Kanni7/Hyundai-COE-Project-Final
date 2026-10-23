@@ -10,6 +10,7 @@ import numpy as np
 from ..config import ASRConfig
 from ..schemas import ASRResult
 from .preprocessing import TARGET_SR, decode_file, is_silent, preprocess
+from .wind_suppression import WindSuppressionSettings, default_wind_settings
 
 
 def _register_cuda_dlls() -> None:
@@ -33,6 +34,16 @@ class ASRUnavailableError(RuntimeError):
 
 class SpeechRecognizer(ABC):
     name = "abstract"
+
+    def get_wind_settings(self) -> WindSuppressionSettings:
+        settings = getattr(self, "_wind_settings", None)
+        return (settings or default_wind_settings()).normalized()
+
+    def set_wind_settings(self, settings: WindSuppressionSettings) -> None:
+        self._wind_settings = settings.normalized()
+
+    def preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
+        return preprocess(audio, wind_settings=self.get_wind_settings())
 
     @abstractmethod
     def transcribe_array(self, audio: np.ndarray, sample_rate: int = TARGET_SR) -> ASRResult: ...
@@ -85,7 +96,7 @@ class FasterWhisperASR(SpeechRecognizer):
         if is_silent(audio, self.config.min_rms):
             return ASRResult(text="", status="silence", duration_s=round(duration, 2))
         t0 = time.perf_counter()
-        audio = preprocess(audio)
+        audio = self.preprocess_audio(audio)
         allowed_langs = self.config.allowed_languages
         try:
             segs, info = self._decode(audio, self.config.language, self.config.initial_prompt)  # None -> auto-detect
@@ -136,7 +147,7 @@ class FasterWhisperASR(SpeechRecognizer):
             return ASRResult(text="", status="silence", duration_s=duration)
         t0 = time.perf_counter()
         try:
-            segs, info = self._decode(preprocess(audio), language, prompt=None)
+            segs, info = self._decode(self.preprocess_audio(audio), language, prompt=None)
         except Exception as exc:
             return ASRResult(text="", status="error", error=f"Whisper inference failed: {exc}")
         text = " ".join(s.text.strip() for s in self._kept(segs, None)).strip()
