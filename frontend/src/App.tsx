@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Armchair, Car, ChevronDown, Fingerprint, Gauge, Languages, Monitor, Play, Plus, Square, Trash2 } from 'lucide-react';
+import { Armchair, Car, ChevronDown, Fingerprint, Gauge, Languages, Monitor, Play, Plus, ScanFace, Square, Trash2 } from 'lucide-react';
 import type { CarState, ChatMessage, Intent, ProfileId, Toast } from './types';
 import { SCENES } from './scenes';
 import { getTimeGreeting, initialCar, runIntents } from './state/car';
@@ -14,6 +14,7 @@ import type { VoicePhase } from './components/Infotainment';
 import { VoiceDock } from './components/VoiceDock';
 import { SettingsMenu } from './components/SettingsMenu';
 import { BharatConnect } from './components/BharatConnect';
+import { DriverMonitor } from './components/DriverMonitor';
 import { Transcript } from './components/Transcript';
 import { SeatView } from './components/SeatView';
 import { PROFILES, removeProfile, useProfileIds, useProfiles } from './lib/profiles';
@@ -176,6 +177,8 @@ export default function App() {
   const [view, setView] = useState<CockpitView>('cabin');
   // BharatConnect (driver <-> passenger translation) owns the microphone while it is open.
   const [bharatOpen, setBharatOpen] = useState(false);
+  // Driver drowsiness monitoring by the cabin camera (components/DriverMonitor.tsx).
+  const [monitorOn, setMonitorOn] = useState(false);
   const [teachingVoice, setTeachingVoice] = useState(false);
   const teachingRecRef = useRef<{ stop: () => Promise<Blob> } | null>(null);
   const [speakerStatus, setSpeakerStatus] = useState<SpeakerStatus | null>(null);
@@ -331,8 +334,7 @@ export default function App() {
 
     if (isPoweringOn) {
       const g = getTimeGreeting();
-      const modeLabel = out.state.ignition === 'on' ? 'Engine started' : 'Electronics on';
-      const welcomeText = `${g.en}! ${modeLabel}.`;
+      const welcomeText = `${g.en}!`;
       setReply({ text: welcomeText, intents: [{ type: 'greet' }], understood: true, asks: false, confirm: false });
       setMessages((m) => [...m, { id: nextId++, role: 'car', text: welcomeText }]);
       carAudio.chime('ok');
@@ -760,6 +762,8 @@ export default function App() {
             )}
           </div>
 
+          <button className={monitorOn ? 'on' : ''} onClick={() => { carAudio.unlock(); setMonitorOn((v) => !v); }}
+            title="Drowsiness detection with the cabin camera"><ScanFace /><span>Driver Monitor</span></button>
           <button className={bharatOpen ? 'on' : ''} onClick={() => setBharatOpen(true)} title="Two-way voice translation between driver and passenger">
             <Languages /><span>BharatConnect</span></button>
           <SettingsMenu status={status} speechLang={speechLang} onLang={setSpeechLang}
@@ -776,6 +780,8 @@ export default function App() {
       </header>
 
       {view === 'seats' && <SeatView car={car} onIntent={handleIntent} />}
+
+      {monitorOn && <DriverMonitor onClose={() => setMonitorOn(false)} />}
 
       {bharatOpen && <BharatConnect onClose={() => setBharatOpen(false)} />}
 

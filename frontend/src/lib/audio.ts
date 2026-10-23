@@ -70,6 +70,7 @@ class CarAudio {
   private volume = 0.4;
   private ducked = false;
   private relay?: number;
+  private siren?: number;
 
   private ensure(): AudioContext {
     if (this.ctx) return this.ctx;
@@ -541,6 +542,38 @@ class CarAudio {
     o.connect(og).connect(this.master);
     o.start(t);
     o.stop(t + 0.05);
+  }
+
+  /** Drowsiness warning: a loud, urgent two-tone beep every 0.7 s until turned off; music is ducked meanwhile. */
+  alarm(on: boolean) {
+    if (on === (this.siren !== undefined)) return;
+    if (!on) {
+      window.clearInterval(this.siren);
+      this.siren = undefined;
+      this.duck(false);
+      return;
+    }
+    this.unlock();
+    this.duck(true);
+    const beep = () => {
+      const ctx = this.ensure();
+      [1760, 1320].forEach((hz, i) => {
+        const t = ctx.currentTime + i * 0.16;
+        const o = ctx.createOscillator();
+        o.type = 'square';
+        o.frequency.value = hz;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(0.22, t + 0.01);
+        g.gain.setValueAtTime(0.22, t + 0.12);
+        g.gain.linearRampToValueAtTime(0.0001, t + 0.14);
+        o.connect(g).connect(this.master);
+        o.start(t);
+        o.stop(t + 0.15);
+      });
+    };
+    beep();
+    this.siren = window.setInterval(beep, 700);
   }
 
   chime(kind: 'listen' | 'ok' | 'error') {

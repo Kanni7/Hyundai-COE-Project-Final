@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { FlaskConical, Layers, Maximize, MessageSquareText, Settings, Wind } from 'lucide-react';
+import { FlaskConical, Layers, Maximize, MessageSquareText, Settings, Volume2, Wind } from 'lucide-react';
+import { useSpeechVoices, testVoiceSample } from '../lib/speech';
 import type { WindSettings, WindTestResult } from '../lib/backend';
 
 interface Props {
@@ -34,6 +35,7 @@ interface Props {
 /** Everything the driver rarely touches, behind one button: language, voice replies, scene, log, debug. */
 export function SettingsMenu(p: Props) {
   const [open, setOpen] = useState(false);
+  const { pref: voicePref, setPref: setVoicePref, activeVoice } = useSpeechVoices();
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -57,6 +59,36 @@ export function SettingsMenu(p: Props) {
           <Row label="Voice replies">
             <Segmented value={p.tts ? 'on' : 'off'} onChange={(v) => p.onTts(v === 'on')} options={[['on', 'On'], ['off', 'Off']]} />
           </Row>
+          {p.tts && (
+            <>
+              <Row label="Car voice">
+                <Segmented
+                  value={voicePref === 'male' ? 'male' : 'female'}
+                  onChange={setVoicePref}
+                  options={[['female', 'Female (Heera)'], ['male', 'Male (Ravi)']]}
+                />
+              </Row>
+              <div className="voice-preview-row">
+                <button
+                  type="button"
+                  className="voice-test-btn"
+                  onClick={() => testVoiceSample(voicePref)}
+                  title="Preview spoken Indian accent"
+                >
+                  <Volume2 size={13} />
+                  <span>Test Voice</span>
+                </button>
+                <span
+                  className="voice-active-label"
+                  title={activeVoice ? `${activeVoice.name} (${activeVoice.lang})` : 'Default Indian voice'}
+                >
+                  {activeVoice
+                    ? activeVoice.name.replace(/^Microsoft\s+/, '').replace(/\s+-\s+English.*$/, '').replace(/\s+Online.*$/, '')
+                    : 'Indian Accent'}
+                </span>
+              </div>
+            </>
+          )}
            {p.asr && (
             <Row label="Speech recogniser">
               <Segmented value={p.asr} onChange={p.onAsr} options={[['browser', 'Web'], ['server', 'Server']]} />
