@@ -632,23 +632,6 @@ export default function App() {
           <span className="brand-sub">Smart Cockpit <i>·</i> Voice AI</span>
         </div>
         <div className="top-actions">
-          {/* Engine Start / Stop Button */}
-          <button
-            className={`topbar-engine-btn ${car.ignition}`}
-            onClick={() => handleIntent({
-              type: 'ignition',
-              mode: engine.brakeHeld && car.ignition !== 'on' ? 'on' : (car.ignition === 'off' ? 'acc' : car.ignition === 'acc' ? 'on' : 'off')
-            })}
-            title={`Ignition: ${car.ignition.toUpperCase()} (Click to toggle: OFF -> ACC -> ON -> OFF)`}
-            aria-label="Engine Start Stop"
-          >
-            <span className="engine-ring-indicator" />
-            <span className="engine-label">
-              <span className="engine-title">ENGINE</span>
-              <span className="engine-sub">START · STOP</span>
-            </span>
-            <span className="engine-status-badge">{car.ignition.toUpperCase()}</span>
-          </button>
 
           <button className={demo !== null ? 'on' : ''} onClick={() => { carAudio.unlock(); setDemo(demo === null ? 0 : null); }}
             title="Run a guided demo">{demo !== null ? <Square /> : <Play />}<span>{demo !== null ? 'Stop demo' : 'Demo'}</span></button>
