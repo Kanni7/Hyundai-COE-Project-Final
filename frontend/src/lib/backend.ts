@@ -79,20 +79,82 @@ export interface WindTestResult {
   noisy_with_suppression: WindTestVariant;
 }
 
+/** A failed API call: HTTP status and the backend's error code (`detail.code`), if any. */
+export class ApiError extends Error {
+  status: number;
+  code: string | null;
+  constructor(path: string, status: number, code: string | null, message?: string) {
+    super(message ?? `${path}: HTTP ${status}`);
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function call<T>(path: string, init?: RequestInit, timeoutMs = TIMEOUT_MS): Promise<T> {
   const ctrl = new AbortController();
   const t = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(`${API}${path}`, { ...init, signal: ctrl.signal });
-    if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+    if (!res.ok) {
+      const detail = (await res.json().catch(() => null))?.detail;
+      throw new ApiError(path, res.status, detail?.code ?? null, typeof detail?.message === 'string' ? detail.message : undefined);
+    }
     return (await res.json()) as T;
   } finally {
     window.clearTimeout(t);
   }
 }
 
+/** Voice tier for this browser, decided by the backend (subscription token or the dev switch), never by the UI. */
+export interface Entitlement {
+  tier: 'free' | 'premium';
+  source: 'token' | 'dev' | 'default';
+  expired: boolean;
+  /** Premium tier and its cloud providers configured on the server. */
+  premium_available: boolean;
+  /** Missing server settings (names only). */
+  problems: string[];
+  dev_tier_switch: boolean;
+  asr_model: string;
+  llm_model: string;
+  configured: boolean;
+}
+
+/** Premium transcript (Sarvam Saaras); `fallback` names why the on-device recogniser answered instead. */
+export interface CloudTranscription extends Transcription {
+  language: string | null;
+  fallback: string | null;
+}
+
+/** The premium LLM's validated answer. `actions` are allowlisted commands to run now. */
+export interface AssistantReply {
+  status: 'execute' | 'confirm' | 'clarify' | 'unsupported' | 'chat' | 'cancelled';
+  actions: Intent[];
+  /** Held until the driver says yes (consequential commands). */
+  pending_actions: Intent[];
+  spoken_response: string;
+  requires_confirmation: boolean;
+  confidence: number;
+}
+
+const CLOUD_TRANSCRIBE_TIMEOUT_MS = 30000; // Sarvam (with one retry), or the on-device fallback
+const CLOUD_INTERPRET_TIMEOUT_MS = 25000; // GPT-6.1 Sol (with one retry)
+
 export const backend = {
   health: () => call<BackendHealth>('/health'),
+  entitlement: () => call<Entitlement>('/assistant/entitlement'),
+  /** Development only: the backend refuses unless BD_DEV_TIER_SWITCH is on. */
+  setDevTier: (tier: 'free' | 'premium') =>
+    call<Entitlement>('/assistant/dev-tier', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tier }) }),
+  cloudTranscribe: (audio: Blob) => {
+    const fd = new FormData();
+    fd.append('file', audio, `speech.${audio.type.includes('mp4') ? 'mp4' : audio.type.includes('ogg') ? 'ogg' : 'webm'}`);
+    return call<CloudTranscription>('/assistant/transcribe', { method: 'POST', body: fd }, CLOUD_TRANSCRIBE_TIMEOUT_MS);
+  },
+  cloudInterpret: (text: string, state: object) =>
+    call<AssistantReply>('/assistant/interpret', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, state }),
+    }, CLOUD_INTERPRET_TIMEOUT_MS),
   reset: () => call<{ ok: boolean }>('/reset', { method: 'POST' }),
   windSettings: () => call<WindSettings>('/wind-settings'),
   updateWindSettings: (settings: WindSettings) =>

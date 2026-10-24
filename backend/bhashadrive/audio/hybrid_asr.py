@@ -14,6 +14,14 @@ from .preprocessing import TARGET_SR, decode_file
 from .wind_suppression import WindSuppressionSettings
 
 
+def _cloud_key() -> str | None:
+    """Cloud Whisper is opt-in (BD_HYBRID_CLOUD_ASR=true): OPENAI_API_KEY is also the premium tier's LLM key,
+    and its presence alone must not send free-tier audio to a paid cloud service."""
+    if os.environ.get("BD_HYBRID_CLOUD_ASR", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        return None
+    return os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY")
+
+
 class HybridASR(SpeechRecognizer):
     """
     Automotive Dual-Mode ASR:
@@ -60,7 +68,7 @@ class HybridASR(SpeechRecognizer):
     @property
     def ready(self) -> bool:
         """True when some engine can transcribe: a local model, or a cloud key while online."""
-        cloud = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY"))
+        cloud = bool(_cloud_key())
         return self._local_asr is not None or (cloud and not self.simulate_offline)
 
     def set_offline_mode(self, offline: bool) -> None:
@@ -82,7 +90,7 @@ class HybridASR(SpeechRecognizer):
         import soundfile as sf
         from ..nlu.normalizer import to_english
 
-        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY")
+        api_key = _cloud_key()
         if not api_key:
             return None  # No cloud key configured, proceed to fast local fallback
 

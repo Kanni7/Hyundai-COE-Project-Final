@@ -13,7 +13,7 @@ import { AddProfileModal } from './AddProfileModal';
 import { EqBars } from './EqBars';
 import { MapView } from './MapView';
 
-export type VoicePhase = 'idle' | 'listening' | 'thinking' | 'speaking';
+export type VoicePhase = 'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking';
 
 interface Props {
   car: CarState;

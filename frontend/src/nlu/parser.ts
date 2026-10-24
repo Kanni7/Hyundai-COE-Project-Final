@@ -30,23 +30,23 @@ export interface ParseResult {
 const W = {
   climate: ['ac', 'aircon', 'air conditioner', 'air conditioning', 'climate', 'temperature', 'temp', 'temprature', 'tapman', 'cooling', 'heater', 'heating', 'degree', 'degrees', 'एसी', 'तापमान', 'टेम्परेचर', 'क्लाइमेट', 'कूलिंग', 'डिग्री'],
   tempWord: ['temperature', 'temp', 'temprature', 'tapman', 'degree', 'degrees', 'तापमान', 'टेम्परेचर', 'डिग्री'],
-  fan: ['fan', 'blower', 'pankha', 'pankhe', 'hawa', 'airflow', 'air flow', 'फैन', 'पंखा', 'हवा', 'ब्लोअर'],
-  feelHot: ['garmi', 'garmee', 'sweating', 'pasina', 'paseena', 'ubal', 'गर्मी', 'गरमी', 'पसीना', 'उबल'],
-  feelCold: ['thand', 'thandi lag', 'sardi', 'freezing', 'chilly', 'kaanp', 'ठंड', 'ठण्ड', 'सर्दी', 'ठंडी लग'],
+  fan: ['fan', 'blower', 'pankha', 'pankhe', 'hawa', 'kaathu', 'airflow', 'air flow', 'फैन', 'पंखा', 'हवा', 'ब्लोअर'],
+  feelHot: ['garmi', 'veyil', 'sudu', 'gorom', 'gorom lagchhe', 'garmee', 'sweating', 'pasina', 'paseena', 'ubal', 'गर्मी', 'गरमी', 'पसीना', 'उबल'],
+  feelCold: ['thand', 'kulir', 'thanda lagchhe', 'thandi lag', 'sardi', 'freezing', 'chilly', 'kaanp', 'ठंड', 'ठण्ड', 'सर्दी', 'ठंडी लग'],
   makeCool: ['thanda', 'thandaa', 'cool', 'cooler', 'colder', 'chill', 'ठंडा', 'ठंडक', 'thandak'],
   makeWarm: ['garam', 'garm', 'warmer', 'warm', 'heat', 'गरम', 'गर्म'],
   cold: ['cold'],
-  causative: ['make', 'set', 'karo', 'kar', 'kardo', 'kar do', 'kijiye', 'karna', 'want', 'chahiye', 'करो', 'कर', 'कीजिए', 'blow', 'air'],
+  causative: ['make', 'set', 'karo', 'pannu', 'pannunga', 'podu', 'koro', 'korun', 'dao', 'kar', 'kardo', 'kar do', 'kijiye', 'karna', 'want', 'chahiye', 'करो', 'कर', 'कीजिए', 'blow', 'air'],
   feeling: ['lag', 'lagi', 'laga', 'lagra', 'lagraha', 'lagrahi', 'feel', 'feeling', 'its', 'im', 'i am', 'is', 'too', 'very', 'bahut', 'hai', 'लग', 'है'],
-  on: ['on', 'start', 'chalu', 'chaalu', 'chalao', 'chala', 'chalaao', 'chalado', 'laga', 'lagao', 'jalao', 'jala', 'shuru', 'enable', 'activate', 'turn on', 'switch on', 'play', 'bajao', 'baja', 'चालू', 'चलाओ', 'चला', 'शुरू', 'लगाओ', 'जलाओ', 'बजाओ', 'ऑन', 'resume'],
-  off: ['off', 'band', 'bandh', 'bnd', 'stop', 'roko', 'rok', 'ruko', 'bujhao', 'bujha', 'disable', 'deactivate', 'turn off', 'switch off', 'hatao', 'hata', 'बंद', 'रोको', 'बुझाओ', 'ऑफ', 'हटाओ', 'pause'],
-  up: ['increase', 'up', 'raise', 'badh*', 'zyada', 'jyada', 'zada', 'tez', 'tej', 'louder', 'more', 'high', 'higher', 'upar', 'max', 'maximum', 'full', 'बढ़*', 'बढ*', 'ज़्यादा', 'ज्यादा', 'तेज़', 'तेज', 'ऊपर', 'brighter'],
-  down: ['decrease', 'down', 'lower', 'reduce', 'kam', 'kum', 'ghata*', 'less', 'low', 'dheere', 'dheema', 'dheemi', 'slow', 'slower', 'quieter', 'soft', 'neeche', 'min', 'minimum', 'dim', 'कम', 'घटा*', 'धीमा', 'धीमी', 'धीरे', 'नीचे'],
+  on: ['on', 'start', 'chalu', 'chalu koro', 'podu', 'podunga', 'khule dao', 'chaalu', 'chalao', 'chala', 'chalaao', 'chalado', 'laga', 'lagao', 'jalao', 'jala', 'shuru', 'enable', 'activate', 'turn on', 'switch on', 'play', 'bajao', 'baja', 'चालू', 'चलाओ', 'चला', 'शुरू', 'लगाओ', 'जलाओ', 'बजाओ', 'ऑन', 'resume'],
+  off: ['off', 'band', 'bandh', 'bondho', 'bondho koro', 'moodu', 'bnd', 'stop', 'roko', 'rok', 'ruko', 'bujhao', 'bujha', 'disable', 'deactivate', 'turn off', 'switch off', 'hatao', 'hata', 'बंद', 'रोको', 'बुझाओ', 'ऑफ', 'हटाओ', 'pause'],
+  up: ['increase', 'up', 'raise', 'athigam', 'jaasti', 'barao', 'beshi', 'badh*', 'zyada', 'jyada', 'zada', 'tez', 'tej', 'louder', 'more', 'high', 'higher', 'upar', 'max', 'maximum', 'full', 'बढ़*', 'बढ*', 'ज़्यादा', 'ज्यादा', 'तेज़', 'तेज', 'ऊपर', 'brighter'],
+  down: ['decrease', 'down', 'lower', 'reduce', 'kam', 'kammi', 'kurai', 'komao', 'kom', 'kum', 'ghata*', 'less', 'low', 'dheere', 'dheema', 'dheemi', 'slow', 'slower', 'quieter', 'soft', 'neeche', 'min', 'minimum', 'dim', 'कम', 'घटा*', 'धीमा', 'धीमी', 'धीरे', 'नीचे'],
   open: ['open', 'khol*', 'खोल*'],
   close: ['close', 'shut', 'band', 'bandh', 'बंद', 'chadha*'],
-  small: ['thoda', 'thodi', 'thora', 'little', 'bit', 'slightly', 'zara', 'jara', 'थोड़ा', 'थोड़ी', 'थोडा', 'ज़रा'],
-  big: ['bahut', 'bohot', 'bahot', 'very', 'much', 'kaafi', 'lot', 'बहुत', 'काफी', 'extremely'],
-  media: ['music', 'song', 'songs', 'gaana', 'gana', 'gaane', 'gane', 'geet', 'sangeet', 'track', 'playlist', 'radio', 'fm', 'media', 'audio', 'गाना', 'गाने', 'संगीत', 'म्यूज़िक', 'म्यूजिक', 'रेडियो', 'गीत'],
+  small: ['thoda', 'thodi', 'konjam', 'ektu', 'thora', 'little', 'bit', 'slightly', 'zara', 'jara', 'थोड़ा', 'थोड़ी', 'थोडा', 'ज़रा'],
+  big: ['bahut', 'bohot', 'romba', 'onek', 'khub', 'beshi', 'bahot', 'very', 'much', 'kaafi', 'lot', 'बहुत', 'काफी', 'extremely'],
+  media: ['music', 'song', 'songs', 'gaana', 'paatu', 'gaan', 'gaanta', 'gana', 'gaane', 'gane', 'geet', 'sangeet', 'track', 'playlist', 'radio', 'fm', 'media', 'audio', 'गाना', 'गाने', 'संगीत', 'म्यूज़िक', 'म्यूजिक', 'रेडियो', 'गीत'],
   radio: ['radio', 'fm', 'रेडियो'],
   volume: ['volume', 'awaaz', 'awaz', 'aawaz', 'aawaaz', 'sound', 'आवाज़', 'आवाज', 'वॉल्यूम'],
   mute: ['mute', 'chup', 'silent', 'silence', 'म्यूट', 'चुप'],
@@ -398,9 +398,25 @@ function extractContact(c: Clause): string | undefined {
 }
 
 function detectLang(text: string): Lang {
+  if (/[஀-௿]/.test(text)) return 'ta';
+  if (/[ঀ-৿]/.test(text)) return 'bn';
   if (/[ऀ-ॿ]/.test(text)) return 'hi';
-  const tokens = normalize(text).split(' ');
-  return tokens.some((t) => HINDI_MARKERS.has(t)) ? 'hi' : 'en';
+
+  const norm = normalize(text).toLowerCase();
+
+  // Tamil / Tanglish colloquial keywords & suffixes
+  if (/\b(konjam|romba|athigam|kammi|kurai|pannu|pannunga|podu|podunga|veyil|sudu|kulir|seri|aamaa|vendaam|vaanga|illai|kaathu|paatu|paata|saththam|adutha|moodu|thiravu|sollunga)\b/i.test(norm)) {
+    return 'ta';
+  }
+
+  // Bengali / Banglish colloquial keywords
+  if (/\b(ektu|komao|kom|barao|gorom|thanda|chalu|bondho|koro|korun|dao|gaan|gaanta|janla|beshi|onek|khub|hyan|thik|dorkar|lagchhe|korlam|korechhi|shuru|nomoshkar|bolun|kichhu)\b/i.test(norm)) {
+    return 'bn';
+  }
+
+  const tokens = norm.split(' ');
+  if (tokens.some((t) => HINDI_MARKERS.has(t))) return 'hi';
+  return 'en';
 }
 
 // ---------------------------------------------------------------- clause parser

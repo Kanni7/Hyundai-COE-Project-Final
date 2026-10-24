@@ -16,6 +16,9 @@ from pydantic import BaseModel, Field
 from ..audio.preprocessing import AudioError, decode_file, preprocess
 from ..audio.speaker_id import SpeakerID
 from ..audio.wind_suppression import WindSuppressionSettings, default_wind_settings, mix_synthetic_wind
+from ..assistant.api import assistant_router
+from ..assistant.entitlements import Entitlements
+from ..assistant.service import AssistantService
 from ..bharat.api import BharatServices, bharat_router
 from ..config import FRONTEND_DIST, AppConfig
 
@@ -38,7 +41,8 @@ class WindSettingsIn(BaseModel):
 
 
 def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = False, mock: bool = False,
-               frontend_dir: Path | None = FRONTEND_DIST, command_llm=None, bharat=None, speaker=None) -> FastAPI:
+               frontend_dir: Path | None = FRONTEND_DIST, command_llm=None, bharat=None, speaker=None,
+               assistant=None, entitlements=None) -> FastAPI:
     config = config or AppConfig()
     speaker = speaker or SpeakerID(config.speaker)  # model loads on first use
     bharat = bharat or BharatServices.from_config(config.bharat)  # services load lazily: free until used
@@ -210,6 +214,26 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
             "noisy_with_suppression": _asr_summary(filtered_result),
         }
 
+    def _identify(p: Path) -> dict | None:
+        if not (speaker.ready and speaker.enrolled()):
+            return None
+        try:
+            return speaker.identify(preprocess(decode_file(p), wind_settings=wind_settings))
+        except Exception as e:  # driver recognition is a bonus: never lose the command over it
+            print(f"[API] speaker ID failed: {e}")
+            return None
+
+    def _local_transcribe(p: Path) -> tuple[str, str | None]:
+        """The on-device recogniser only (premium fallback): never a cloud engine."""
+        asr = getattr(pipeline.asr, "_local_asr", None) or pipeline.asr
+        if asr is None:
+            return "", None
+        with lock:
+            res = asr.transcribe_file(p)
+            text = res.text or ""
+            ranked = pipeline.rank_transcripts(*(res.hypotheses or [text])) if is_v2 and text else [text]
+        return (ranked[0] if ranked else ""), getattr(asr, "name", None)
+
     @api.post("/transcribe")
     async def transcribe(file: UploadFile = File(...)):
         """Speech to text only. The cockpit routes the transcript itself (backend or local parser).
@@ -226,11 +250,8 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
                 res = asr.transcribe_file(p)
                 asr_text = res.text or ""
                 ranked = pipeline.rank_transcripts(*(res.hypotheses or [asr_text])) if is_v2 and asr_text else [asr_text]
-                if asr_text and speaker.ready and speaker.enrolled():
-                    try:
-                        who = speaker.identify(preprocess(decode_file(p), wind_settings=wind_settings))
-                    except Exception as e:  # driver recognition is a bonus: never lose the command over it
-                        print(f"[API /transcribe] speaker ID failed: {e}")
+                if asr_text:
+                    who = _identify(p)
         text = ranked[0] if ranked else ""
         name = getattr(getattr(asr, "_local_asr", None) or asr, "name", None)
         print(f"[API /transcribe] {name} {res.latency_s}s status={res.status} asr={res.hypotheses or [asr_text]} -> refined={ranked}")
@@ -334,6 +355,10 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
         return {"ok": True}
 
     api.include_router(bharat_router(bharat))
+    assistant = assistant or AssistantService(config.assistant)
+    if assistant.problems and config.assistant.dev_tier_switch:
+        print(f"[NOTE] Premium voice disabled until configured: {', '.join(assistant.problems)}")
+    api.include_router(assistant_router(assistant, entitlements or Entitlements(config.assistant), _local_transcribe, _identify))
     app.include_router(api)
     app.include_router(api, prefix="/api")
     if frontend_dir is not None and (frontend_dir / "index.html").is_file():

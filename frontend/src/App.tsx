@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Armchair, Car, ChevronDown, Fingerprint, Gauge, Languages, Monitor, Play, Plus, ScanFace, Square, Trash2 } from 'lucide-react';
+import { Armchair, Car, ChevronDown, Fingerprint, Gauge, Languages, Monitor, Play, Plus, ScanFace, Sparkles, Square, Trash2 } from 'lucide-react';
 import type { CarState, ChatMessage, Intent, ProfileId, Toast } from './types';
 import { SCENES } from './scenes';
 import { getTimeGreeting, initialCar, runIntents } from './state/car';
@@ -7,7 +7,7 @@ import { parseCommand, type NluContext, type ParseResult } from './nlu/parser';
 import { carAudio } from './lib/audio';
 import { engine } from './lib/engine';
 import { speak, useSpeechRecognition } from './lib/speech';
-import { BACKEND_DOMAIN, backend, recordAudio, toIntent, type BackendHealth, type SpeakerStatus, type Transcription, type WindSettings, type WindTestResult } from './lib/backend';
+import { ApiError, BACKEND_DOMAIN, backend, recordAudio, toIntent, type BackendHealth, type Entitlement, type SpeakerStatus, type Transcription, type WindSettings, type WindTestResult } from './lib/backend';
 import { suggestionsFor } from './lib/intents';
 import { Cockpit, type CockpitView } from './components/Cockpit';
 import type { VoicePhase } from './components/Infotainment';
@@ -52,7 +52,7 @@ interface Routed {
   intents: Intent[];
   /** Backend reply for turns that change nothing (questions, refusals, saved shortcuts). */
   say?: string;
-  engine: 'backend' | 'local' | 'llm';
+  engine: 'backend' | 'local' | 'llm' | 'cloud';
   awaitingConfirm?: boolean;
 }
 
@@ -139,10 +139,37 @@ async function route(text: string, parsed: ParseResult, server: BackendHealth | 
   };
 }
 
+/** What the premium LLM may need to resolve "thoda aur", "wapas", "same as before": a small, content-free snapshot. */
+function snapshot(car: CarState) {
+  return {
+    climate: { on: car.climate.on, temp: car.climate.temp, fan: car.climate.fan },
+    media: { playing: car.media.playing, volume: car.media.volume, muted: car.media.muted },
+    ambient: { on: car.ambient.on, color: car.ambient.color },
+    screen: car.screen, navigating_to: car.nav?.destination ?? null, drive_mode: car.driveMode,
+  };
+}
+
+/**
+ * Premium tier: the cloud LLM reads every transcript (it handles Tanglish, context and follow-ups the
+ * on-device models don't). Only allowlisted commands come back; consequential ones wait for a spoken yes on
+ * the server. If the cloud is unreachable, rate-limited or the subscription lapsed, the on-device route takes over.
+ */
+async function routePremium(text: string, parsed: ParseResult, server: BackendHealth | null, car: CarState): Promise<Routed> {
+  try {
+    const r = await backend.cloudInterpret(text, snapshot(car));
+    if (r.status === 'execute' && r.actions.length) return { intents: r.actions, say: r.spoken_response, engine: 'cloud' };
+    return { intents: [], say: r.spoken_response || "Sorry, I didn't catch that.", engine: 'cloud', awaitingConfirm: r.status === 'confirm' };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) return { intents: [], say: 'Still working on the previous command.', engine: 'cloud' };
+    return route(text, parsed, server);
+  }
+}
+
 export default function App() {
   const [car, setCar] = useState<CarState>(initialCar);
   const carRef = useRef(car);
   const nlu = useRef<NluContext>({});
+  const driverIdentified = useRef(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     { id: nextId++, role: 'car', text: 'Namaste! I am your Verna. Speak or type in English, Hindi or Hinglish.' },
   ]);
@@ -152,6 +179,11 @@ export default function App() {
   const [reply, setReply] = useState<{ text: string; intents: Intent[]; understood: boolean; asks: boolean; confirm: boolean } | null>(null);
   const [heard, setHeard] = useState<{ text: string; via: 'voice' | 'text' | 'chip' } | null>(null);
   const [server, setServer] = useState<BackendHealth | null>(null);
+  // Voice tier from the backend's entitlement check (Settings shows it; the dev switch changes it there).
+  const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
+  const premium = !!server && !!entitlement?.premium_available;
+  const premiumRef = useRef(premium);
+  useEffect(() => { premiumRef.current = premium; }, [premium]);
   const serverRef = useRef(server);
   useEffect(() => { serverRef.current = server; }, [server]);
   const awaitingConfirm = useRef(false);
@@ -228,7 +260,8 @@ export default function App() {
     const started = Date.now();
     const parsed = parseCommand(text, nlu.current);
     let greeting = '';
-    if (via === 'voice' && !parsed.intents.some((i) => i.type === 'profile')) {
+    if (via === 'voice' && !driverIdentified.current && !parsed.intents.some((i) => i.type === 'profile')) {
+      driverIdentified.current = true;
       if (speaker) {
         if (speaker !== carRef.current.profile) {
           const sw = runIntents(carRef.current, [{ type: 'profile', id: speaker }], parsed.lang, { speed: engine.speed });
@@ -236,10 +269,13 @@ export default function App() {
             commit(sw.state);
             if (sw.toast) setToast({ ...sw.toast, id: nextId++ });
             const name = profiles[speaker]?.name || PROFILES[speaker]?.name || speaker;
-            greeting = parsed.lang === 'hi' ? `Namaste ${name}, seat aapke hisaab se set. ` : `Hi ${name}, I've set your seat. `;
+            greeting = parsed.lang === 'hi' ? `Namaste ${name}, seat aapke hisaab se set. `
+              : parsed.lang === 'ta' ? `Vanakkam ${name}, ungalukku seat set pannitten. `
+              : parsed.lang === 'bn' ? `Nomoshkar ${name}, apnar seat set kore dilam. `
+              : `Hi ${name}, I've set your seat. `;
           }
         } else {
-          // Speaker matched current profile: show confirmation toast so driver knows their voice was recognized
+          // Speaker matched current profile on first command: show confirmation toast once
           setToast({
             id: nextId++,
             icon: 'seat',
@@ -248,7 +284,7 @@ export default function App() {
           });
         }
       } else {
-        // Unrecognized voice: fallback to default profile if not already default
+        // Unrecognized voice on first command: fallback to default profile once
         if (carRef.current.profile !== 'default') {
           const sw = runIntents(carRef.current, [{ type: 'profile', id: 'default' }], parsed.lang, { speed: engine.speed });
           if (sw.state.profile === 'default') {
@@ -256,7 +292,11 @@ export default function App() {
             if (sw.toast) setToast({ ...sw.toast, id: nextId++ });
             greeting = parsed.lang === 'hi'
               ? 'Aapki aawaz pehchaan nahi paaye, default profile set kar di hai. '
-              : 'Voice not recognized. Switched to Default profile. ';
+              : parsed.lang === 'ta'
+                ? 'Kural adaiyaalam theriya villai, default profile set pannitten. '
+                : parsed.lang === 'bn'
+                  ? 'Golar aawaz chenaa gelo na, default profile set kore dilam. '
+                  : 'Voice not recognized. Switched to Default profile. ';
           }
         }
       }
@@ -266,9 +306,13 @@ export default function App() {
 
     const finish = ({ intents, say, engine: via, awaitingConfirm: awaiting }: Routed) => {
       awaitingConfirm.current = !!awaiting;
-      const out = say
-        ? { state: carRef.current, text: say, toast: undefined, understood: true }
-        : runIntents(carRef.current, intents, parsed.lang, { speed: engine.speed });
+      const ran = intents.length ? runIntents(carRef.current, intents, parsed.lang, { speed: engine.speed }) : null;
+      const out = {
+        state: ran ? ran.state : carRef.current,
+        text: (say || (ran ? ran.text : "Sorry, I didn't catch that.")),
+        toast: ran ? ran.toast : undefined,
+        understood: ran ? ran.understood : (say ? true : false),
+      };
       out.text = greeting + out.text;
       commit(out.state);
       if (out.state.ignition === 'on' && intents.some((i) => i.type === 'rev')) engine.blip(1300);
@@ -291,7 +335,9 @@ export default function App() {
       }
     };
 
-    route(text, parsed, serverRef.current)
+    (premiumRef.current && serverRef.current
+      ? routePremium(text, parsed, serverRef.current, carRef.current)
+      : route(text, parsed, serverRef.current))
       .catch((): Routed => {
         setServer(null); // backend went away: carry on with the local parser
         return { intents: parsed.intents, engine: 'local' };
@@ -310,9 +356,15 @@ export default function App() {
           windSettingsRef.current = settings;
           setWindSettings(settings);
         }).catch(() => setWindSettings(null));
+        void backend.entitlement().then((e) => {
+          setEntitlement(e);
+          if (first && e.configured && e.tier === 'free' && e.dev_tier_switch) {
+            void backend.setDevTier('premium').then(setEntitlement).catch(() => {});
+          }
+        }, () => setEntitlement(null));
         if (first) { first = false; void backend.reset().catch(() => {}); }
       })
-      .catch(() => setServer(null));
+      .catch(() => { setServer(null); setEntitlement(null); });
     check();
     const t = window.setInterval(check, 15000);
     return () => window.clearInterval(t);
@@ -325,6 +377,7 @@ export default function App() {
     const prevIgnition = carRef.current.ignition;
     const out = runIntents(carRef.current, [intent], 'en', { speed: engine.speed });
     commit(out.state);
+    if (out.state.ignition === 'off') { driverIdentified.current = false; }
     if (out.toast && intent.type !== 'screen') setToast({ ...out.toast, id: nextId++ });
 
     // When the car powers on into ACC or ON mode
@@ -352,8 +405,9 @@ export default function App() {
   const speechFailed = useRef<(code: string) => boolean>(() => false);
   const speech = useSpeechRecognition((text) => handleCommand(text, 'voice'), (code) => speechFailed.current(code));
   const serverAsr = !!server?.asr_ready;
-  const useServerAsr = serverAsr && (asrMode === 'server' || !speech.supported || hasEnrolledSpeakers);
-  const micSupported = speech.supported || serverAsr;
+  // Premium records in the browser for Sarvam on the backend, whatever the browser recogniser can do.
+  const useServerAsr = premium || (serverAsr && (asrMode === 'server' || !speech.supported || hasEnrolledSpeakers));
+  const micSupported = speech.supported || serverAsr || premium;
 
   const changeWindSettings = useCallback((patch: Partial<WindSettings>) => {
     const current = windSettingsRef.current;
@@ -412,6 +466,25 @@ export default function App() {
       // Ends on the mic button, on a pause after speech, or at the length limit.
       void r.done.then(async (audio) => {
         setRecording(null);
+        if (premiumRef.current) {
+          setPhase('transcribing');
+          try {
+            const t = await backend.cloudTranscribe(audio);
+            if (t.fallback) setToast({ id: nextId++, icon: 'power', label: 'Cloud speech unavailable', value: 'Used on-device recognition' });
+            if (t.text.trim()) { handleCommand(t.text.trim(), 'voice', driverIdentified.current ? undefined : t.speaker?.profile); return; }
+            setPhase('idle');
+            setAsrError(t.error ?? 'No speech heard. Try again.');
+            return;
+          } catch (e) {
+            // Subscription lapsed / not configured / busy: fall through to the on-device recogniser.
+            if (e instanceof ApiError && (e.status === 409 || e.status === 413 || e.status === 400 || e.status === 429)) {
+              setPhase('idle');
+              setAsrError(e.message);
+              return;
+            }
+            void backend.entitlement().then(setEntitlement, () => {});
+          }
+        }
         setPhase('thinking');
         try {
           const t = await backend.transcribe(audio);
@@ -749,7 +822,46 @@ export default function App() {
             title="Drowsiness detection with the cabin camera"><ScanFace /><span>Driver Monitor</span></button>
           <button className={bharatOpen ? 'on' : ''} onClick={() => setBharatOpen(true)} title="Two-way voice translation between driver and passenger">
             <Languages /><span>BharatConnect</span></button>
+
+          {entitlement?.dev_tier_switch && (
+            <div className="tier-toggle-pill" title={entitlement.tier === 'premium' ? (entitlement.premium_available ? `Active Tier: Premium (Sarvam + ${entitlement.llm_model})` : 'Active Tier: Premium (Local fallback - keys missing in .env)') : 'Active Tier: Free (Local on-device)'}>
+              <button
+                type="button"
+                className={entitlement.tier === 'free' ? 'active' : ''}
+                onClick={() => {
+                  void backend.setDevTier('free').then((e) => {
+                    setEntitlement(e);
+                    setToast({ id: nextId++, icon: 'power', label: 'Voice AI Tier', value: 'Switched to Free (On-device)' });
+                  });
+                }}
+              >
+                Free
+              </button>
+              <button
+                type="button"
+                className={`premium ${entitlement.tier === 'premium' ? 'active' : ''}`}
+                onClick={() => {
+                  void backend.setDevTier('premium').then((e) => {
+                    setEntitlement(e);
+                    setToast({
+                      id: nextId++,
+                      icon: 'power',
+                      label: 'Voice AI Tier',
+                      value: e.premium_available
+                        ? `Switched to Premium (Sarvam + ${e.llm_model})`
+                        : 'Switched to Premium (Local fallback - add keys in .env)',
+                    });
+                  });
+                }}
+              >
+                <Sparkles size={12} />
+                <span>Premium</span>
+              </button>
+            </div>
+          )}
           <SettingsMenu status={status} speechLang={speechLang} onLang={setSpeechLang}
+            voiceTier={server ? entitlement : null}
+            onDevTier={(tier) => void backend.setDevTier(tier).then(setEntitlement, () => {})}
             tts={tts} onTts={(v) => { setTts(v); if (!v) window.speechSynthesis?.cancel(); }}
              asr={serverAsr && speech.supported ? asrMode : undefined} onAsr={setAsrMode}
              sceneLabel={SCENE_LABEL[car.scene]} onNextScene={() => handleIntent({ type: 'scene', scene: NEXT_SCENE[car.scene] })}

@@ -619,6 +619,63 @@ const NEEDS_POWER = new Set<Intent['type']>([
   'mood', 'nav.start', 'phone.call', 'screen', 'seat.vent', 'cluster.view',
 ]);
 
+
+export function formatReplyLang(rep: Reply, lang: Lang): string {
+  if (rep[lang]) return rep[lang]!;
+  if (lang === 'hi') return rep.hi;
+  if (lang === 'en') return rep.en;
+
+  const en = rep.en || '';
+
+  if (lang === 'ta') {
+    if (/Setting the temperature to/i.test(en)) return en.replace(/Setting the temperature to ([\d.]+°C)\.?/i, 'AC temperature $1-ku set pannitten.');
+    if (/Temperature (?:lowered|raised|adjusted) to/i.test(en)) return en.replace(/Temperature (?:lowered|raised|adjusted) to ([\d.]+°C)\.?/i, 'Temperature $1-ku change pannitten.');
+    if (/Cooling the cabin down to/i.test(en)) return en.replace(/Cooling the cabin down to ([\d.]+°C)\.?/i, 'Veyil kammi panren. Temperature $1 pannitten.');
+    if (/Warming the cabin up to/i.test(en)) return en.replace(/Warming the cabin up to ([\d.]+°C)\.?/i, 'Kulir kammi panren. Temperature $1 pannitten.');
+    if (/AC is on/i.test(en) || /Climate on/i.test(en)) return 'AC on pannitten.';
+    if (/AC turned off/i.test(en) || /Climate off/i.test(en)) return 'AC off pannitten.';
+    if (/Fan speed (\d+)/i.test(en)) return en.replace(/Fan speed (\d+)\.?/i, 'Fan speed $1-ku set pannitten.');
+    if (/Music paused/i.test(en)) return 'Music pause pannitten.';
+    if (/Playing/i.test(en)) return en.replace(/Playing (.+)\.?/i, 'Paatu play aaguthu: $1.');
+    if (/Next track/i.test(en)) return en.replace(/Next track:? (.+)\.?/i, 'Next track $1 play aaguthu.');
+    if (/Previous track/i.test(en)) return 'Previous track play aaguthu.';
+    if (/Muted/i.test(en)) return 'Volume mute pannitten.';
+    if (/Volume (\d+)/i.test(en)) return en.replace(/Volume (\d+)\.?/i, 'Volume $1-ku set pannitten.');
+    if (/Sunroof/i.test(en)) return /Open/i.test(en) ? 'Sunroof open pannitten.' : 'Sunroof close pannitten.';
+    if (/Window/i.test(en) || /windshield/i.test(en)) return /Roll|Open/i.test(en) ? 'Window open pannitten.' : 'Window close pannitten.';
+    if (/Engine started/i.test(en)) return 'Engine start aayiduchu.';
+    if (/Engine off/i.test(en) || /switched off/i.test(en)) return 'Engine off pannitten.';
+    if (/Hello/i.test(en) || /Namaste/i.test(en)) return 'Vanakkam! Sollunga, AC, music, navigation eathavathu seiyyanuma?';
+    if (/Anytime/i.test(en)) return 'Paravaille!';
+    return rep.hi || rep.en;
+  }
+
+  if (lang === 'bn') {
+    if (/Setting the temperature to/i.test(en)) return en.replace(/Setting the temperature to ([\d.]+°C)\.?/i, 'AC temperature $1-e set kore dilam.');
+    if (/Temperature (?:lowered|raised|adjusted) to/i.test(en)) return en.replace(/Temperature (?:lowered|raised|adjusted) to ([\d.]+°C)\.?/i, 'Temperature $1 kore dilam.');
+    if (/Cooling the cabin down to/i.test(en)) return en.replace(/Cooling the cabin down to ([\d.]+°C)\.?/i, 'Gorom kam korchhi. Temperature $1 kore dilam.');
+    if (/Warming the cabin up to/i.test(en)) return en.replace(/Warming the cabin up to ([\d.]+°C)\.?/i, 'Thanda kam korchhi. Temperature $1 kore dilam.');
+    if (/AC is on/i.test(en) || /Climate on/i.test(en)) return 'AC chalu kore dilam.';
+    if (/AC turned off/i.test(en) || /Climate off/i.test(en)) return 'AC bondho kore dilam.';
+    if (/Fan speed (\d+)/i.test(en)) return en.replace(/Fan speed (\d+)\.?/i, 'Fan speed $1 kore dilam.');
+    if (/Music paused/i.test(en)) return 'Gaan bondho kore dilam.';
+    if (/Playing/i.test(en)) return en.replace(/Playing (.+)\.?/i, 'Gaan chalu kore dilam: $1.');
+    if (/Next track/i.test(en)) return en.replace(/Next track:? (.+)\.?/i, 'Next track $1 chalu korlam.');
+    if (/Previous track/i.test(en)) return 'Aager track chalu korlam.';
+    if (/Muted/i.test(en)) return 'Awaaz mute kore dilam.';
+    if (/Volume (\d+)/i.test(en)) return en.replace(/Volume (\d+)\.?/i, 'Volume $1 kore dilam.');
+    if (/Sunroof/i.test(en)) return /Open/i.test(en) ? 'Sunroof khule dilam.' : 'Sunroof bondho kore dilam.';
+    if (/Window/i.test(en) || /windshield/i.test(en)) return /Roll|Open/i.test(en) ? 'Janla khule dilam.' : 'Janla bondho kore dilam.';
+    if (/Engine started/i.test(en)) return 'Engine start hoye gechhe.';
+    if (/Engine off/i.test(en) || /switched off/i.test(en)) return 'Engine bondho kore dilam.';
+    if (/Hello/i.test(en) || /Namaste/i.test(en)) return 'Nomoshkar! Bolun, ki korte hobe? AC, gaan, navigation shob kichhu.';
+    if (/Anytime/i.test(en)) return 'Shagotom!';
+    return rep.hi || rep.en;
+  }
+
+  return rep.en;
+}
+
 export function runIntents(state: CarState, intents: Intent[], lang: Lang, env: Env = { speed: 0 }) {
   let s = state;
   const replies: Reply[] = [];
@@ -636,10 +693,14 @@ export function runIntents(state: CarState, intents: Intent[], lang: Lang, env: 
   }
   const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
   const text = replies.length
-    ? replies.map((rep) => cap(rep[lang])).join(' ')
+    ? replies.map((rep) => cap(formatReplyLang(rep, lang))).join(' ')
     : lang === 'hi'
       ? 'Maaf kijiye, samajh nahi aaya. Boliye "AC 22 pe karo" ya "gaana chalao".'
-      : 'Sorry, I didn\'t catch that. Try "set AC to 22" or "play some music".';
+      : lang === 'ta'
+        ? "Mannikkanum, puriyala. 'AC 22-ku set pannu' illa 'paatu podu' nu sollunga."
+        : lang === 'bn'
+          ? "Dukkhito, bujhte parini. 'AC 22 koro' ba 'gaan chalu koro' bolun."
+          : 'Sorry, I didn\'t catch that. Try "set AC to 22" or "play some music".';
   const toast = [...replies].reverse().find((rep) => rep.toast)?.toast;
   return { state: s, text, toast: toast as Omit<Toast, 'id'> | undefined, understood: replies.length > 0 };
 }

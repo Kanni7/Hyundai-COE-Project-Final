@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { FlaskConical, Layers, Maximize, MessageSquareText, Settings, Volume2, Wind } from 'lucide-react';
 import { useSpeechVoices, testVoiceSample } from '../lib/speech';
-import type { WindSettings, WindTestResult } from '../lib/backend';
+import type { Entitlement, WindSettings, WindTestResult } from '../lib/backend';
 
 interface Props {
   /** Connection line, e.g. "BhashaDrive NLU · English · हिन्दी · Hinglish"; `detail` goes in its tooltip. */
   status: { text: string; online: boolean; detail: string };
+  /** Voice tier, as the backend decided it; null while the backend is unreachable. */
+  voiceTier: Entitlement | null;
+  /** Development only (backend BD_DEV_TIER_SWITCH): switch this cockpit between Free and Premium. */
+  onDevTier: (tier: 'free' | 'premium') => void;
   speechLang: 'en-IN' | 'hi-IN';
   onLang: (l: 'en-IN' | 'hi-IN') => void;
   tts: boolean;
@@ -53,6 +57,19 @@ export function SettingsMenu(p: Props) {
       </button>
       {open && (
         <div className="settings-pop" role="dialog" aria-label="Settings">
+          <Row label="Voice AI">
+            <span className="settings-tier" title={p.voiceTier?.problems.length ? `Not configured: ${p.voiceTier.problems.join(', ')}` : undefined}>
+              {!p.voiceTier ? 'On-device (offline)'
+                : p.voiceTier.premium_available ? `Premium · ${p.voiceTier.asr_model} + ${p.voiceTier.llm_model}`
+                  : p.voiceTier.tier === 'premium' ? 'Premium (not configured) · on-device'
+                    : p.voiceTier.expired ? 'Subscription expired · on-device' : 'Free · on-device'}
+            </span>
+          </Row>
+          {p.voiceTier?.dev_tier_switch && (
+            <Row label="Tier (dev)">
+              <Segmented value={p.voiceTier.tier} onChange={p.onDevTier} options={[['free', 'Free'], ['premium', 'Premium']]} />
+            </Row>
+          )}
           <Row label="Speech language">
             <Segmented value={p.speechLang} onChange={p.onLang} options={[['en-IN', 'EN'], ['hi-IN', 'हिं']]} />
           </Row>

@@ -101,6 +101,64 @@ class BharatConfig:
 
 
 @dataclass
+class AssistantConfig:
+    """Premium voice assistant: Sarvam Saaras ASR -> OpenAI LLM. Keys are read from the server environment only."""
+
+    sarvam_api_key: str | None = field(default_factory=lambda: os.environ.get("SARVAM_API_KEY") or None)
+    sarvam_url: str = field(default_factory=lambda: _env("BD_SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text"))
+    sarvam_model: str = field(default_factory=lambda: _env("BD_SARVAM_STT_MODEL", "saaras:v4"))
+    # codemix: English words in Latin script, Indic words in native script (Hinglish / Tanglish).
+    sarvam_mode: str = field(default_factory=lambda: _env("BD_SARVAM_STT_MODE", "codemix"))
+    # "unknown" = auto-detect; or a BCP-47 code such as hi-IN, ta-IN, en-IN.
+    sarvam_language: str = field(default_factory=lambda: _env("BD_SARVAM_STT_LANGUAGE", "unknown"))
+    sarvam_timeout_s: float = field(default_factory=lambda: _env_float("BD_SARVAM_TIMEOUT_S", 8.0))
+    # Sarvam pricing page: Speech to Text, Rs 30 per hour, billed per second.
+    sarvam_inr_per_hour: float = field(default_factory=lambda: _env_float("BD_SARVAM_INR_PER_HOUR", 30.0))
+    groq_api_key: str | None = field(default_factory=lambda: os.environ.get("GROQ_API_KEY") or None)
+    openai_api_key: str | None = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY") or None)
+    openai_url: str = field(default_factory=lambda: _env("BD_OPENAI_RESPONSES_URL", "https://api.openai.com/v1/responses"))
+    openai_model: str = field(default_factory=lambda: _env("BD_OPENAI_MODEL", "gpt-6.1-sol"))
+    # Lowest effort the model accepts: spoken commands need a fast answer, not deep reasoning.
+    openai_reasoning_effort: str = field(default_factory=lambda: _env("BD_OPENAI_REASONING_EFFORT", "low"))
+    openai_timeout_s: float = field(default_factory=lambda: _env_float("BD_OPENAI_TIMEOUT_S", 10.0))
+    # USD per 1M tokens (OpenAI model page for gpt-6.1-sol).
+    openai_usd_per_m_input: float = field(default_factory=lambda: _env_float("BD_OPENAI_USD_PER_M_INPUT", 2.0))
+    openai_usd_per_m_output: float = field(default_factory=lambda: _env_float("BD_OPENAI_USD_PER_M_OUTPUT", 10.0))
+    usd_to_inr: float = field(default_factory=lambda: _env_float("BD_USD_TO_INR", 88.0))
+    # One retry for transient provider errors (timeouts, 429, 5xx): both calls only read, so retrying is safe.
+    retries: int = field(default_factory=lambda: _env_int("BD_ASSISTANT_RETRIES", 1))
+    max_audio_s: float = field(default_factory=lambda: _env_float("BD_ASSISTANT_MAX_AUDIO_S", 20.0))  # Sarvam REST: 30 s
+    rate_per_min: int = field(default_factory=lambda: _env_int("BD_ASSISTANT_RATE_PER_MIN", 20))
+    context_turns: int = field(default_factory=lambda: _env_int("BD_ASSISTANT_CONTEXT_TURNS", 4))
+    min_confidence: float = field(default_factory=lambda: _env_float("BD_ASSISTANT_MIN_CONFIDENCE", 0.5))
+    # Entitlements: JSON file {"<token>": {"tier": "premium", "expires": "2026-12-31T23:59:59Z"}} (server-side).
+    entitlements_file: Path | None = field(default_factory=lambda: _abs(os.environ["BD_ENTITLEMENTS_FILE"]) if os.environ.get("BD_ENTITLEMENTS_FILE") else None)
+    # Development only: lets the local UI switch its tier (loopback requests only). Never enable in production.
+    dev_tier_switch: bool = field(default_factory=lambda: _env_bool("BD_DEV_TIER_SWITCH", False))
+    dev_default_tier: str = field(default_factory=lambda: _env("BD_DEV_DEFAULT_TIER", "free"))
+    usage_log: Path = field(default_factory=lambda: _abs(_env("BD_ASSISTANT_USAGE_LOG", "data/usage/assistant_usage.jsonl")))
+    # Development only: keep transcripts in the server log for debugging. Off in production.
+    log_transcripts: bool = field(default_factory=lambda: _env_bool("BD_ASSISTANT_LOG_TRANSCRIPTS", False))
+
+    def problems(self) -> list[str]:
+        """Configuration errors, checked at startup (the premium tier is disabled while any remain)."""
+        out = []
+        if not self.sarvam_api_key:
+            out.append("SARVAM_API_KEY not set")
+        if not self.openai_api_key:
+            out.append("OPENAI_API_KEY not set")
+        if self.sarvam_mode not in {"transcribe", "translate", "verbatim", "translit", "codemix"}:
+            out.append(f"BD_SARVAM_STT_MODE invalid: {self.sarvam_mode}")
+        if self.openai_reasoning_effort not in {"low", "medium", "high", "xhigh", "max"}:
+            out.append(f"BD_OPENAI_REASONING_EFFORT invalid: {self.openai_reasoning_effort}")
+        if not 0 < self.max_audio_s <= 30:
+            out.append("BD_ASSISTANT_MAX_AUDIO_S must be in (0, 30] (Sarvam REST limit)")
+        if self.dev_default_tier not in {"free", "premium"}:
+            out.append(f"BD_DEV_DEFAULT_TIER invalid: {self.dev_default_tier}")
+        return out
+
+
+@dataclass
 class SpeakerIDConfig:
     """Driver recognition by voice: 3D-Speaker CAM++ embeddings (zh/en, sherpa-onnx), matched to enrolled profiles."""
 
@@ -193,6 +251,7 @@ class AppConfig:
     command_llm: CommandLLMConfig = field(default_factory=CommandLLMConfig)
     bharat: BharatConfig = field(default_factory=BharatConfig)
     speaker: SpeakerIDConfig = field(default_factory=SpeakerIDConfig)
+    assistant: AssistantConfig = field(default_factory=AssistantConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     limits: VehicleLimits = field(default_factory=VehicleLimits)
     context: ContextConfig = field(default_factory=ContextConfig)

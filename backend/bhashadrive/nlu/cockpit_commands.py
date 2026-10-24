@@ -115,7 +115,7 @@ def valid(cmd: object) -> bool:
                 return False
             if s["type"] == "integer" and v != int(v):
                 return False
-        if s.get("type") == "string" and not (isinstance(v, str) and s["minLength"] <= len(v) <= s["maxLength"]):
+        if s.get("type") == "string" and not (isinstance(v, str) and s.get("minLength", 0) <= len(v) <= s.get("maxLength", 60)):
             return False
     return True
 

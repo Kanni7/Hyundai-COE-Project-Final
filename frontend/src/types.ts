@@ -1,4 +1,4 @@
-export type Lang = 'en' | 'hi';
+export type Lang = 'en' | 'hi' | 'ta' | 'bn';
 export type Genre = 'lofi' | 'romantic' | 'party' | 'devotional' | 'retro';
 export type AmbientColor =
   | 'blue' | 'red' | 'green' | 'purple' | 'pink' | 'orange' | 'white' | 'yellow' | 'cyan' | 'gold';
@@ -112,6 +112,8 @@ export interface Toast {
 export interface Reply {
   en: string;
   hi: string;
+  ta?: string;
+  bn?: string;
   toast?: Omit<Toast, 'id'>;
 }
 
@@ -122,5 +124,5 @@ export interface ChatMessage {
   intents?: Intent[];
   via?: 'voice' | 'text' | 'chip';
   /** Which NLU understood the command (set only while the backend is connected). */
-  engine?: 'backend' | 'local' | 'llm';
+  engine?: 'backend' | 'local' | 'llm' | 'cloud';
 }

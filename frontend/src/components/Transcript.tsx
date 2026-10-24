@@ -4,7 +4,7 @@ import type { ChatMessage } from '../types';
 import { describeIntent } from '../lib/intents';
 
 const VIA = { voice: Mic, text: Keyboard, chip: MousePointerClick };
-const ENGINE_LABEL = { backend: 'BhashaDrive', local: 'local parser', llm: 'command LLM' } as const;
+const ENGINE_LABEL = { backend: 'BhashaDrive', local: 'local parser', llm: 'command LLM', cloud: 'premium cloud' } as const;
 
 export function Transcript({ messages, onClose, onClear }: { messages: ChatMessage[]; onClose: () => void; onClear: () => void }) {
   const end = useRef<HTMLDivElement>(null);

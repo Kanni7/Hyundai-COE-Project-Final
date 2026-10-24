@@ -18,3 +18,7 @@ reports/_asr_items.json
 *.onnx
 *.npz
 *.sqlite
+
+# premium tier: usage logs and subscription tokens are never committed
+data/usage/
+data/entitlements.json

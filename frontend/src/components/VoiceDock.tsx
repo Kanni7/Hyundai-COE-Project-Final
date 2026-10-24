@@ -32,13 +32,14 @@ export function VoiceDock({ phase, interim, heard, reply, suggestions, supported
   const answering = listening && !!reply?.asks;
 
   const status = listening ? (answering ? 'Listening for your answer…' : 'Listening…')
+    : phase === 'transcribing' ? 'Transcribing…'
     : phase === 'thinking' ? 'Understanding…'
       : phase === 'speaking' ? 'Speaking'
         : error ?? (supported ? 'Tap the mic or press Space to talk' : 'Type a command below');
   // While listening the old exchange gives way to the live words (keeping a question being answered);
   // while thinking only the new command shows.
   const heardLine = listening ? (interim ? { text: interim, via: 'voice' as const } : null) : heard;
-  const replyLine = phase === 'thinking' || (listening && !answering) ? null : reply;
+  const replyLine = phase === 'thinking' || phase === 'transcribing' || (listening && !answering) ? null : reply;
 
   return (
     <div className="dock">
