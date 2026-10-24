@@ -287,6 +287,10 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
         try:
             with lock:
                 samples = speaker.enroll(profile, audio)
+        except ModuleNotFoundError as e:
+            if e.name == "sherpa_onnx":
+                raise HTTPException(503, "Speaker runtime is not installed; install backend requirements-app.txt") from e
+            raise
         except ValueError as e:
             raise HTTPException(400, str(e))
         return {"profile": profile, "samples": samples}

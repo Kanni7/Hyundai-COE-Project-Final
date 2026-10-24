@@ -51,7 +51,7 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate        Linux: source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
-python scripts/download_models.py --asr swift apex --encoder minilm e5   # one-time, ~2.2 GB; swift+minilm only: ~0.6 GB
+python scripts/download_models.py --asr swift apex --encoder minilm e5   # one-time; also fetches the driver voice model
 ```
 
 Model files go to `./models` and trained artifacts to `./artifacts` (both git-ignored). After the
