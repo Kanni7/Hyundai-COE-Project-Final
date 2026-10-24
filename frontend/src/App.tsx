@@ -568,11 +568,12 @@ export default function App() {
       setPhase('idle');
       const msg = err instanceof Error ? err.message : String(err);
       const isShort = msg.toLowerCase().includes('at least') || msg.toLowerCase().includes('short') || msg.toLowerCase().includes('speech');
+      const modelMissing = msg.toLowerCase().includes('speaker model') || msg.toLowerCase().includes('speaker runtime');
       setToast({
         id: nextId++,
         icon: 'seat',
         label: 'Voice Training',
-        value: isShort ? 'Sample too short (need 2s+)' : 'Enrollment failed',
+        value: isShort ? 'Sample too short (need 2s+)' : modelMissing ? 'Install the speaker model, then restart' : 'Enrollment failed',
       });
       carAudio.chime('error');
     } finally {

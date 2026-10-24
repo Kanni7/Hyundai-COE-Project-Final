@@ -189,7 +189,10 @@ export const backend = {
     fd.append('file', audio, `voice.${audio.type.includes('mp4') ? 'mp4' : audio.type.includes('ogg') ? 'ogg' : 'webm'}`);
     const res = await fetch(`${API}/speaker/${profile}`, { method: 'POST', body: fd });
     const j = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(j.detail ?? `HTTP ${res.status}`);
+    if (!res.ok) {
+      const detail = typeof j.detail === 'string' ? j.detail : j.detail?.message;
+      throw new ApiError(`/speaker/${profile}`, res.status, j.detail?.code ?? null, detail ?? `HTTP ${res.status}`);
+    }
     return j as { profile: ProfileId; samples: number };
   },
   forget: (profile: ProfileId) => call<{ samples: number }>(`/speaker/${profile}`, { method: 'DELETE' }),

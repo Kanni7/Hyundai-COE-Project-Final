@@ -64,9 +64,13 @@ One-time model download (~150 MB + ~480 MB):
 
 ```bash
 cd backend
-.venv/Scripts/python scripts/download_models.py --asr swift --encoder
+.venv/Scripts/python scripts/download_models.py --asr swift --encoder minilm
 .venv/Scripts/python -c "from faster_whisper import WhisperModel; WhisperModel('small', compute_type='int8')"
 ```
+
+That download also installs the local CAM++ speaker model used by the driver-profile
+**Teach Voice** button. Voice teaching enrolls a local voice embedding; it does not
+fine-tune the speech recognizer.
 
 ## Mock vs trained NLU
 
