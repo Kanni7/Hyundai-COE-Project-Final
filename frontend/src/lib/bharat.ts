@@ -103,7 +103,7 @@ async function speak(text: string, lang: Lang): Promise<Blob> {
  * audio has finished playing, autoplay was blocked, or a stage failed (recorded on the turn, never thrown).
  * `endedAt` is when the speaker finished (performance.now()), the start of the end-to-end latency.
  */
-export async function runTurn(turn: Turn, from: Stage, endedAt: number, update: (t: Turn) => void): Promise<void> {
+export async function runTurn(turn: Turn, from: Stage, endedAt: number, update: (t: Turn) => void): Promise<boolean> {
   let t: Turn = { ...turn, error: undefined, needsPlay: false };
   const set = (patch: Partial<Turn>) => { t = { ...t, ...patch, timings: { ...t.timings, ...patch.timings } }; update(t); };
   const timed = async <T>(key: 'asr' | 'translate' | 'tts', fn: () => Promise<T>): Promise<T> => {
@@ -127,9 +127,10 @@ export async function runTurn(turn: Turn, from: Stage, endedAt: number, update: 
     const detail = e instanceof StageError ? e.detail : { stage: t.status as Stage, message: String(e), retryable: true };
     // The translated text is still shown when only the speech failed.
     set({ status: 'error', error: detail, timings: { total: t.translated ? Math.round(performance.now() - endedAt) : undefined } });
-    return;
+    return false;
   }
   await play(t, endedAt, set);
+  return t.status === 'done' && !t.error && !t.needsPlay;
 }
 
 /** Play the turn's speech; records the latency when sound starts and frees the audio when it ends. */

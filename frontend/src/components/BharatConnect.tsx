@@ -21,7 +21,7 @@ const ROLE: Record<Speaker, string> = { driver: 'Driver', passenger: 'Passenger'
 const OTHER: Record<Speaker, Speaker> = { driver: 'passenger', passenger: 'driver' };
 const secs = (ms?: number) => (ms === undefined ? '–' : `${(ms / 1000).toFixed(1)} s`);
 
-/** Two-way driver <-> passenger voice translation (alternating push-to-talk). */
+/** Two-way driver <-> passenger voice translation (continuous conversational flow & push-to-talk). */
 export function BharatConnect({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<BharatStatus | null>(null);
   const [offline, setOffline] = useState(false);
@@ -30,22 +30,56 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
   const [rec, setRec] = useState<{ speaker: Speaker; stop: () => Promise<Blob> } | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [micError, setMicError] = useState<string | null>(null);
+  const [autoConversation, setAutoConversation] = useState(true);
+
+  const autoRef = useRef(true);
+  autoRef.current = autoConversation;
+  const autoTimer = useRef<number | null>(null);
+  const isClosed = useRef(false);
+  const activeStopRef = useRef<(() => Promise<Blob>) | null>(null);
+
   const nextId = useRef(1);
   const history = useRef<HTMLOListElement>(null);
 
+  const clearAutoTimer = useCallback(() => {
+    if (autoTimer.current !== null) {
+      window.clearTimeout(autoTimer.current);
+      autoTimer.current = null;
+    }
+  }, []);
+
+  const handleClose = useCallback(() => {
+    isClosed.current = true;
+    clearAutoTimer();
+    if (activeStopRef.current) {
+      void activeStopRef.current();
+    }
+    onClose();
+  }, [clearAutoTimer, onClose]);
+
   useEffect(() => {
+    isClosed.current = false;
     const refresh = () => bharat.status().then((s) => { setStatus(s); setOffline(false); }).catch(() => setOffline(true));
     void refresh();
     void bharat.warmup().then(refresh); // load the speech model before the first turn
-  }, []);
+    return () => {
+      isClosed.current = true;
+      clearAutoTimer();
+      if (activeStopRef.current) {
+        void activeStopRef.current();
+      }
+    };
+  }, [clearAutoTimer]);
+
   useEffect(() => { history.current?.scrollTo({ top: history.current.scrollHeight, behavior: 'smooth' }); }, [turns]);
 
   const upsert = useCallback((t: Turn) => setTurns((ts) => ts.map((x) => (x.id === t.id ? t : x))), []);
   // `endedAt` (end of speech) starts the latency clock; a retry starts it when it begins.
-  const run = useCallback(async (t: Turn, from: Stage, endedAt?: number) => {
+  const run = useCallback(async (t: Turn, from: Stage, endedAt?: number): Promise<boolean> => {
     setBusy(t.id);
-    await runTurn(t, from, endedAt ?? performance.now(), upsert);
+    const success = await runTurn(t, from, endedAt ?? performance.now(), upsert);
     setBusy(null);
+    return success;
   }, [upsert]);
 
   // Recording, or any turn in flight (including playback), locks both microphones: no overlapping
@@ -58,8 +92,12 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
       : last?.status === 'error' ? 'error' : 'idle';
 
   const talk = async (speaker: Speaker) => {
-    if (rec) { if (rec.speaker === speaker) void rec.stop(); return; }
-    if (busy !== null) return;
+    clearAutoTimer();
+    if (rec) {
+      if (rec.speaker === speaker) void rec.stop();
+      return;
+    }
+    if (busy !== null || isClosed.current) return;
     setMicError(null);
     let r: Awaited<ReturnType<typeof recordAudio>>;
     try {
@@ -68,27 +106,64 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
       setMicError('The microphone is blocked or unavailable. Allow microphone access and try again.');
       return;
     }
+    if (isClosed.current) {
+      void r.stop();
+      return;
+    }
+    activeStopRef.current = r.stop;
     setRec({ speaker, stop: r.stop });
     const recording = await r.done;
+    activeStopRef.current = null;
     const endedAt = performance.now();
     setRec(null);
+
+    if (isClosed.current) return;
+
     const t: Turn = { id: nextId.current++, speaker, source: langs[speaker], target: langs[OTHER[speaker]], status: 'transcribing', timings: {}, recording };
     setTurns((ts) => [...ts, t]);
-    await run(t, 'transcribing', endedAt);
+    const success = await run(t, 'transcribing', endedAt);
+
+    // Continuous conversation: automatically trigger the other speaker once TTS playback ends!
+    if (success && autoRef.current && !isClosed.current) {
+      clearAutoTimer();
+      autoTimer.current = window.setTimeout(() => {
+        if (autoRef.current && !isClosed.current) {
+          void talk(OTHER[speaker]);
+        }
+      }, 500);
+    }
   };
 
   const retry = (t: Turn) => {
+    clearAutoTimer();
     const stage = t.error?.stage;
     const from: Stage = stage === 'translating' ? 'translating' : stage === 'generating_audio' || stage === 'playing_audio' ? 'generating_audio' : 'transcribing';
-    void run({ ...t, retried: true }, from);
+    void run({ ...t, retried: true }, from).then((success) => {
+      if (success && autoRef.current && !isClosed.current) {
+        clearAutoTimer();
+        autoTimer.current = window.setTimeout(() => {
+          if (autoRef.current && !isClosed.current) {
+            void talk(OTHER[t.speaker]);
+          }
+        }, 500);
+      }
+    });
   };
+
   const replay = (t: Turn) => {
+    clearAutoTimer();
     setBusy(t.id);
     let cur = t;
     void play(t, null, (patch) => { cur = { ...cur, ...patch, timings: { ...cur.timings, ...patch.timings } }; upsert(cur); })
       .then(() => setBusy(null));
   };
-  const endSession = () => { setTurns([]); setMicError(null); };
+
+  const endSession = () => {
+    clearAutoTimer();
+    if (activeStopRef.current) void activeStopRef.current();
+    setTurns([]);
+    setMicError(null);
+  };
 
   const languages = status?.languages ?? FALLBACK_LANGS;
   const langName = (c: Lang) => languages.find((l) => l.code === c)?.name ?? c;
@@ -97,16 +172,28 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
       : micError;
 
   return (
-    <div className="bc-backdrop" onPointerDown={(e) => { if (e.target === e.currentTarget && !locked) onClose(); }}>
+    <div className="bc-backdrop" onPointerDown={(e) => { if (e.target === e.currentTarget && !locked) handleClose(); }}>
       <section className="bc" role="dialog" aria-label="BharatConnect voice translation">
         <header className="bc-head">
           <Languages className="bc-logo" />
           <div className="bc-title"><b>BharatConnect</b><small>Driver ↔ passenger voice translation</small></div>
+          <button
+            type="button"
+            className={`bc-auto-btn ${autoConversation ? 'on' : ''}`}
+            onClick={() => {
+              clearAutoTimer();
+              setAutoConversation((v) => !v);
+            }}
+            title={autoConversation ? 'Conversation mode: ON (auto-alternates speakers)' : 'Conversation mode: OFF (manual push-to-talk)'}
+          >
+            <span className="bc-auto-dot" />
+            <span>Auto: {autoConversation ? 'ON' : 'OFF'}</span>
+          </button>
           <span className={`bc-state ${state}`} aria-live="polite">{STATE_LABEL[state]}</span>
           <button className="bc-tool" onClick={endSession} disabled={locked || !turns.length} title="Clear the conversation">
             <RotateCcw /><span>End session</span>
           </button>
-          <button className="bc-tool" onClick={onClose} disabled={locked} aria-label="Close BharatConnect"><X /></button>
+          <button className="bc-tool" onClick={handleClose} aria-label="Close BharatConnect"><X /></button>
         </header>
 
         {problem && <p className="bc-problem"><AlertTriangle />{problem}</p>}
@@ -129,7 +216,7 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
                   {mine && <><i /><i /></>}
                 </button>
                 <small className="bc-hint">
-                  {mine ? 'Listening… tap to stop' : locked ? 'Wait for the translation' : `Tap and speak ${langName(langs[sp])}`}
+                  {mine ? 'Listening… tap to stop' : locked ? 'Wait for the translation' : autoConversation ? `Auto-listen or tap ${ROLE[sp]}` : `Tap and speak ${langName(langs[sp])}`}
                 </small>
                 <small className="bc-to">heard in {langName(langs[OTHER[sp]])}</small>
               </div>
