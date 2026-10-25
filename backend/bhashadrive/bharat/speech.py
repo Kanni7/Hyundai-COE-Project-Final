@@ -75,16 +75,15 @@ class Transcriber:
 
         # Primary: The EXACT same SarvamASR engine used by the premium assistant
         try:
-            transcript = self.assistant_asr.transcribe(audio, TARGET_SR, language_code=lang.tts)
+            transcript = self.assistant_asr.transcribe(audio, TARGET_SR)
             text = transcript.text.strip()
-            if text:
-                return {
-                    "text": text,
-                    "language": transcript.language or lang.code,
-                    "status": "ok",
-                    "duration_s": round(audio_s, 2),
-                    "latency_s": transcript.latency_s
-                }
+            return {
+                "text": text,
+                "language": lang.code,
+                "status": "ok" if text else "silence",
+                "duration_s": round(audio_s, 2),
+                "latency_s": transcript.latency_s
+            }
         except ProviderError as e:
             print(f"[Bharat ASR] Premium SarvamASR failed ({e}). Falling back to local.")
         except Exception as e:

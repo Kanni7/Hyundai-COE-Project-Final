@@ -104,7 +104,7 @@ class SarvamASR:
         buf = io.BytesIO()
         sf.write(buf, audio, sample_rate, format="WAV", subtype="PCM_16")
         target_lang = language_code or self.config.sarvam_language
-        target_mode = "transcribe" if (language_code and language_code != "unknown") else self.config.sarvam_mode
+        target_mode = self.config.sarvam_mode
         data = {"model": self.config.sarvam_model, "mode": target_mode, "language_code": target_lang}
 
         if self.config.sarvam_model == "saaras:v4":  # keyterms are a v4 feature

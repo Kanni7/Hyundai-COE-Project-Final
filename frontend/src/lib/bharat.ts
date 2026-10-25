@@ -120,7 +120,7 @@ export async function runTurn(turn: Turn, from: Stage, endedAt: number, update: 
       set({ original: asr.text });
       if (asr.language) {
         const detected = asr.language.split('-')[0] as Lang;
-        if (['hi', 'ta', 'en', 'bn'].includes(detected)) {
+        if (['hi', 'ta', 'en', 'bn'].includes(detected) && detected !== t.target) {
           t.source = detected;
           set({ source: detected });
         }

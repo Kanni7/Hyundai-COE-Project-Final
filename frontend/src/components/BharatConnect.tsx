@@ -101,7 +101,7 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
     setMicError(null);
     let r: Awaited<ReturnType<typeof recordAudio>>;
     try {
-      r = await recordAudio(20000, 1800, { autoGainControl: true }); // ends on a natural pause (1.8s) after speech, a second tap, or 20 s
+      r = await recordAudio(10000, 900, { noiseSuppression: true, autoGainControl: false }); // exact same clean audio pipeline as premium voice assistant
     } catch {
       setMicError('The microphone is blocked or unavailable. Allow microphone access and try again.');
       return;
