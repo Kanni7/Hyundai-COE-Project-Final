@@ -1,7 +1,7 @@
 """BharatConnect languages: one row per language, with the code each service expects.
 
-Adding a language is one row here, provided Whisper, Cloud Translation and Cloud Text-to-Speech all
-support it (TTS support is also checked at runtime against the live voice list).
+Adding a language is one row here, provided Whisper/Sarvam, Translation and Text-to-Speech all
+support it.
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ LANGUAGES: dict[str, Language] = {lang.code: lang for lang in (
     Language("ta", "Tamil", "தமிழ்", "ta", "ta-IN"),
     Language("hi", "Hindi", "हिन्दी", "hi", "hi-IN"),
     Language("en", "English", "English", "en", "en-IN"),
+    Language("bn", "Bengali", "বাংলা", "bn", "bn-IN"),
 )}
 
 

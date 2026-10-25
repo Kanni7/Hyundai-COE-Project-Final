@@ -95,7 +95,7 @@ def test_turn_pipeline_routes():
     services = BharatServices(Transcriber(BharatConfig(), factory=FakeWhisper),
                               GoogleTranslator("p", client=FakeTranslate()), GoogleTTS(client=FakeTTS()))
     c = TestClient(create_app(AppConfig(), make_pipeline(), bharat=services))
-    assert [l["code"] for l in c.get("/api/bharat/status").json()["languages"]] == ["ta", "hi", "en"]
+    assert [l["code"] for l in c.get("/api/bharat/status").json()["languages"]] == ["ta", "hi", "en", "bn"]
     heard = c.post("/api/bharat/transcribe", files={"file": ("a.wav", WAV.read_bytes(), "audio/wav")}, data={"language": "ta"}).json()
     assert heard["text"] == "spoken in ta" and heard["status"] == "ok"
     said = c.post("/api/bharat/translate", json={"text": heard["text"], "source": "ta", "target": "hi"}).json()

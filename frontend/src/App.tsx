@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Armchair, Car, ChevronDown, Fingerprint, Gauge, Languages, Monitor, Play, Plus, ScanFace, Sparkles, Square, Trash2 } from 'lucide-react';
+import { Armchair, Car, ChevronDown, Fingerprint, Gauge, Languages, Monitor, Play, Plus, ScanFace, ShieldAlert, Sparkles, Square, Trash2 } from 'lucide-react';
 import type { CarState, ChatMessage, Intent, ProfileId, Toast } from './types';
 import { SCENES } from './scenes';
 import { getTimeGreeting, initialCar, runIntents } from './state/car';
@@ -15,6 +15,7 @@ import { VoiceDock } from './components/VoiceDock';
 import { SettingsMenu } from './components/SettingsMenu';
 import { BharatConnect } from './components/BharatConnect';
 import { DriverMonitor } from './components/DriverMonitor';
+import { SafeExitGuardian } from './components/SafeExitGuardian';
 import { Transcript } from './components/Transcript';
 import { SeatView } from './components/SeatView';
 import { PROFILES, removeProfile, useProfileIds, useProfiles } from './lib/profiles';
@@ -211,6 +212,8 @@ export default function App() {
   const [bharatOpen, setBharatOpen] = useState(false);
   // Driver drowsiness monitoring by the cabin camera (components/DriverMonitor.tsx).
   const [monitorOn, setMonitorOn] = useState(false);
+  // Safe Exit Guardian owns a separate webcam session; keep it mutually exclusive with DriverMonitor.
+  const [safeExitOpen, setSafeExitOpen] = useState(false);
   const [teachingVoice, setTeachingVoice] = useState(false);
   const teachingRecRef = useRef<{ stop: () => Promise<Blob> } | null>(null);
   const [speakerStatus, setSpeakerStatus] = useState<SpeakerStatus | null>(null);
@@ -344,7 +347,7 @@ export default function App() {
       })
       // Typed commands get a short "thinking" beat; spoken ones already waited for speech recognition.
       .then((routed) => window.setTimeout(() => finish(routed), via === 'voice' ? 0 : Math.max(0, THINK_MS - (Date.now() - started))));
-  }, [commit]);
+  }, [commit, profiles]);
 
   // Find the backend; recheck now and then so it can be started after the page.
   useEffect(() => {
@@ -579,7 +582,7 @@ export default function App() {
     } finally {
       setTeachingVoice(false);
     }
-  }, [handleCommand, refreshSpeakers, browserNoiseSuppression, autoGainControl]);
+  }, [profiles, refreshSpeakers, browserNoiseSuppression, autoGainControl]);
 
   // Chrome's recogniser streams audio to Google; when that fails ("network"), carry on with the
   // backend's Whisper for the rest of the session and keep listening, so the driver need not repeat the tap.
@@ -819,8 +822,23 @@ export default function App() {
             )}
           </div>
 
-          <button className={monitorOn ? 'on' : ''} onClick={() => { carAudio.unlock(); setMonitorOn((v) => !v); }}
-            title="Drowsiness detection with the cabin camera"><ScanFace /><span>Driver Monitor</span></button>
+          <button className={safeExitOpen ? 'on' : ''} onClick={() => {
+            carAudio.unlock();
+            setSafeExitOpen((v) => {
+              const next = !v;
+              if (next) setMonitorOn(false);
+              return next;
+            });
+          }} title="Local object detection for the Safe Exit Guardian demo"><ShieldAlert /><span>Safe Exit</span></button>
+          <button className={monitorOn ? 'on' : ''} onClick={() => {
+            carAudio.unlock();
+            setMonitorOn((v) => {
+              const next = !v;
+              if (next) setSafeExitOpen(false);
+              return next;
+            });
+          }}
+             title="Drowsiness detection with the cabin camera"><ScanFace /><span>Driver Monitor</span></button>
           <button className={bharatOpen ? 'on' : ''} onClick={() => setBharatOpen(true)} title="Two-way voice translation between driver and passenger">
             <Languages /><span>BharatConnect</span></button>
 
@@ -876,6 +894,8 @@ export default function App() {
       </header>
 
       {view === 'seats' && <SeatView car={car} onIntent={handleIntent} />}
+
+      {safeExitOpen && <SafeExitGuardian onClose={() => setSafeExitOpen(false)} />}
 
       {monitorOn && <DriverMonitor onClose={() => setMonitorOn(false)} />}
 

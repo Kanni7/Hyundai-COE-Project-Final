@@ -17,7 +17,12 @@ if [ ! -x "$py" ]; then
   "$py" -m pip install -e "$root/backend"
 fi
 
-if [ "$rebuild" = 1 ] || [ ! -f "$root/frontend/dist/index.html" ]; then
+model_needs_build=0
+if [ ! -f "$root/frontend/dist/mediapipe/efficientdet_lite0.tflite" ] || [ "$root/frontend/public/mediapipe/efficientdet_lite0.tflite" -nt "$root/frontend/dist/mediapipe/efficientdet_lite0.tflite" ]; then
+  model_needs_build=1
+fi
+
+if [ "$rebuild" = 1 ] || [ ! -f "$root/frontend/dist/index.html" ] || [ "$model_needs_build" = 1 ]; then
   echo "[setup] Building frontend..."
   (cd "$root/frontend" && { [ -d node_modules ] || npm install; } && npm run build)
 fi

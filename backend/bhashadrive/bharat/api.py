@@ -103,7 +103,8 @@ def bharat_router(s: BharatServices) -> APIRouter:
         except (ServiceError, ValueError) as e:
             _fail(e)
         print(f"[API /bharat/speak] {body.language} {len(body.text)} chars -> {len(audio)} bytes in {seconds:.2f}s")
-        return Response(audio, media_type="audio/mpeg",
+        media_type = "audio/wav" if audio.startswith(b"RIFF") else "audio/mpeg"
+        return Response(audio, media_type=media_type,
                         headers={"X-Voice": voice, "X-Latency-S": f"{seconds:.3f}", "Cache-Control": "no-store"})
 
     return r

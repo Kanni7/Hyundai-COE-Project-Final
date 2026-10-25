@@ -5,7 +5,7 @@
 
 import { API } from './backend';
 
-export type Lang = 'ta' | 'hi' | 'en';
+export type Lang = 'ta' | 'hi' | 'en' | 'bn';
 export type Speaker = 'driver' | 'passenger';
 export type Stage = 'transcribing' | 'translating' | 'generating_audio';
 /** Session states; `recording` and `playing_audio` lock both microphones. */

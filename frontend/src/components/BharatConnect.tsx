@@ -7,6 +7,7 @@ const FALLBACK_LANGS = [
   { code: 'ta', name: 'Tamil', native: 'தமிழ்' },
   { code: 'hi', name: 'Hindi', native: 'हिन्दी' },
   { code: 'en', name: 'English', native: 'English' },
+  { code: 'bn', name: 'Bengali', native: 'বাংলা' },
 ] as const;
 const STATE_LABEL: Record<SessionState, string> = {
   idle: 'Ready', recording: 'Listening…', transcribing: 'Transcribing…', translating: 'Translating…',

@@ -1,20 +1,17 @@
-"""Speech synthesis through Google Cloud Text-to-Speech (official `google-cloud-texttospeech` client).
-
-Translation and speech are separate services: Cloud Translation only returns text. Before a language is
-spoken, the live voice list is checked for a voice in it (best quality tier first); the answer is cached.
-Uses the same Application Default Credentials as translation.
-"""
+"""Speech synthesis for BharatConnect: Sarvam Bulbul Text-to-Speech with Google Cloud fallback."""
 from __future__ import annotations
 
+import base64
+import os
 import threading
 import time
 from collections import OrderedDict
+import httpx
 
 from .errors import ServiceError, google_error
 from .languages import Language, language
 
-SERVICE = "Google Cloud Text-to-Speech"
-# Voice families by quality, best first ("ta-IN-Wavenet-A", "hi-IN-Neural2-B", ...).
+SERVICE = "BharatConnect Speech"
 _TIERS = ("Neural2", "Wavenet", "Standard")
 
 
@@ -39,7 +36,6 @@ class GoogleTTS:
         return self._client
 
     def voice_for(self, lang: Language) -> str:
-        """The voice used for `lang`; raises if the service has none for it."""
         if lang.tts in self._voices:
             return self._voices[lang.tts]
         try:
@@ -56,18 +52,60 @@ class GoogleTTS:
         return ranked[0]
 
     def synthesize(self, text: str, lang_code: str) -> tuple[bytes, str, float]:
-        """(MP3 bytes, voice name, seconds)."""
+        """(audio bytes, voice name, seconds)."""
         lang = language(lang_code)
         text = " ".join(text.split())
         if not text:
             raise ServiceError("generating_audio", "Nothing to speak: the translation is empty.", 422, False)
         t0 = time.perf_counter()
+
+        # If a mock client was explicitly provided (unit tests):
+        if self._client is not None:
+            return self._synthesize_google(text, lang, t0)
+
+        # Primary: Sarvam Bulbul TTS
+        sarvam_key = os.environ.get("SARVAM_API_KEY")
+        if sarvam_key:
+            voice = f"sarvam:bulbul:v3:aditya"
+            key = (voice, text)
+            with self._lock:
+                if key in self._cache:
+                    self._cache.move_to_end(key)
+                    return self._cache[key], voice, round(time.perf_counter() - t0, 3)
+
+            try:
+                payload = {
+                    "inputs": [text],
+                    "target_language_code": lang.tts,
+                    "speaker": "aditya",
+                    "model": "bulbul:v3"
+                }
+                headers = {"api-subscription-key": sarvam_key, "Content-Type": "application/json"}
+                with httpx.Client(timeout=self.timeout_s) as client:
+                    resp = client.post("https://api.sarvam.ai/text-to-speech", headers=headers, json=payload)
+                if resp.status_code == 200:
+                    audios = resp.json().get("audios", [])
+                    if audios:
+                        audio_content = base64.b64decode(audios[0])
+                        with self._lock:
+                            self._cache[key] = audio_content
+                            while len(self._cache) > self.cache_size:
+                                self._cache.popitem(last=False)
+                        return audio_content, voice, round(time.perf_counter() - t0, 3)
+                print(f"[Bharat TTS] Sarvam TTS returned {resp.status_code}: {resp.text[:100]}")
+            except Exception as e:
+                print(f"[Bharat TTS] Sarvam TTS failed ({e}). Falling back to Google if configured.")
+
+        # Secondary: Google Cloud Text-to-Speech
+        return self._synthesize_google(text, lang, t0)
+
+    def _synthesize_google(self, text: str, lang: Language, t0: float) -> tuple[bytes, str, float]:
         voice = self.voice_for(lang)
         key = (voice, text)
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
-                return self._cache[key], voice, time.perf_counter() - t0
+                return self._cache[key], voice, round(time.perf_counter() - t0, 3)
         try:
             resp = self._get_client().synthesize_speech(request={
                 "input": {"text": text}, "voice": {"language_code": lang.tts, "name": voice},
@@ -80,4 +118,4 @@ class GoogleTTS:
             self._cache[key] = resp.audio_content
             while len(self._cache) > self.cache_size:
                 self._cache.popitem(last=False)
-        return resp.audio_content, voice, time.perf_counter() - t0
+        return resp.audio_content, voice, round(time.perf_counter() - t0, 3)

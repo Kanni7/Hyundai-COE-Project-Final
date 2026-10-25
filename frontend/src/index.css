@@ -1614,3 +1614,131 @@ img.layer { object-fit: fill; }
   box-shadow: 0 0 10px rgba(168, 85, 247, 0.35);
   border: 1px solid rgba(168, 85, 247, 0.5) !important;
 }
+
+/* ------------------------------------------------------------------ Safe Exit Guardian */
+.safe-exit {
+  --safe: #70aeff;
+  position: fixed;
+  top: 76px;
+  right: 20px;
+  width: min(430px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+  border-radius: 16px;
+  background: var(--glass-strong);
+  border: 1px solid color-mix(in srgb, var(--safe) 45%, var(--line));
+  backdrop-filter: blur(16px) saturate(1.25);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.58), 0 0 28px color-mix(in srgb, var(--safe) 13%, transparent);
+  animation: slide-in 0.28s ease both;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.safe-exit.warning { --safe: #ff5967; box-shadow: 0 16px 44px rgba(0, 0, 0, 0.58), 0 0 32px rgba(255, 64, 78, 0.25); }
+.safe-exit.camera-error { --safe: #ffb84d; }
+.safe-exit-head { display: flex; align-items: center; gap: 10px; }
+.safe-exit-title { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1; }
+.safe-exit-title > svg { width: 20px; height: 20px; color: var(--safe); }
+.safe-exit-title div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.safe-exit-title b { font-size: 15px; font-weight: 650; letter-spacing: 0.02em; }
+.safe-exit-title small { color: var(--muted); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.safe-exit-head-actions { display: flex; gap: 4px; }
+.safe-exit-head-actions button { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); }
+.safe-exit-head-actions button:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+.safe-exit-head-actions svg { width: 15px; height: 15px; }
+.safe-exit-cam { position: relative; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 11px; background: #020308; border: 1px solid var(--line); }
+.safe-exit-cam video, .safe-exit-cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.safe-exit-cam video { background: #030508; }
+.safe-exit-cam-badge { position: absolute; top: 9px; left: 9px; z-index: 1; display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 999px; background: rgba(3, 5, 8, 0.72); border: 1px solid rgba(255, 255, 255, 0.12); color: #e9eef7; font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; }
+.safe-exit-live-dot { width: 7px; height: 7px; border-radius: 50%; background: #69758b; }
+.safe-exit-live-dot.ready { background: var(--ok); box-shadow: 0 0 9px rgba(62, 224, 140, 0.75); animation: blink 1.4s steps(1) infinite; }
+.safe-exit-live-dot.starting { background: #ffb84d; animation: blink 0.8s steps(1) infinite; }
+.safe-exit-live-dot.error { background: var(--danger); }
+.safe-exit-cam-message { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 28px; text-align: center; background: radial-gradient(circle at center, rgba(11, 23, 43, 0.88), rgba(2, 4, 8, 0.95)); }
+.safe-exit-cam-message > svg { width: 28px; height: 28px; color: var(--safe); margin-bottom: 3px; }
+.safe-exit-cam-message b { font-size: 14px; }
+.safe-exit-cam-message span { max-width: 300px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.safe-exit-cam-message button { margin-top: 4px; height: 32px; padding: 0 13px; border-radius: 9px; background: color-mix(in srgb, var(--safe) 26%, transparent); border: 1px solid color-mix(in srgb, var(--safe) 48%, transparent); color: #fff; font-size: 12px; font-weight: 650; }
+.safe-exit-cam-message button:hover:not(:disabled) { background: color-mix(in srgb, var(--safe) 38%, transparent); }
+.safe-exit-cam-message button:disabled { opacity: 0.55; cursor: wait; }
+.safe-exit-status { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; color: var(--safe); background: color-mix(in srgb, var(--safe) 15%, transparent); }
+.safe-exit-status > svg { width: 25px; height: 25px; flex: none; }
+.safe-exit-status div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.safe-exit-status b { font-size: 16px; letter-spacing: 0.06em; }
+.safe-exit-status span { color: #c5d0e2; font-size: 11px; line-height: 1.35; }
+.safe-exit-status.open { color: var(--ok); background: rgba(62, 224, 140, 0.13); }
+.safe-exit-door-row { display: flex; align-items: stretch; gap: 7px; }
+.safe-exit-door-state { min-width: 112px; display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-radius: 9px; background: rgba(255, 255, 255, 0.055); border: 1px solid var(--line); }
+.safe-exit-door-state > svg { width: 17px; height: 17px; color: var(--muted); }
+.safe-exit-door-state div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.safe-exit-door-state small { color: var(--muted); font-size: 8.5px; letter-spacing: 0.08em; }
+.safe-exit-door-state b { color: #e9eef7; font-size: 12px; letter-spacing: 0.05em; }
+.safe-exit-door-state.open { border-color: rgba(62, 224, 140, 0.42); background: rgba(62, 224, 140, 0.11); }
+.safe-exit-door-state.open > svg, .safe-exit-door-state.open b { color: var(--ok); }
+.safe-exit-door-actions { min-width: 0; flex: 1; display: flex; gap: 6px; flex-wrap: wrap; }
+.safe-exit-door-actions button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border-radius: 9px; border: 1px solid var(--line); font-size: 10.5px; }
+.safe-exit-door-actions button svg { width: 14px; height: 14px; }
+.safe-exit-open { flex: 1; min-width: 116px; color: #fff; background: color-mix(in srgb, var(--accent) 24%, transparent); border-color: color-mix(in srgb, var(--accent) 52%, transparent) !important; }
+.safe-exit-open:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 36%, transparent); }
+.safe-exit-close { background: rgba(62, 224, 140, 0.13); border-color: rgba(62, 224, 140, 0.35) !important; color: #baffd7; }
+.safe-exit-reset-inline { background: rgba(255, 255, 255, 0.055); color: #c9d6ee; }
+.safe-exit-reset-inline:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.safe-exit-door-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+.safe-exit-controls { display: flex; gap: 7px; }
+.safe-exit-controls button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: 9px; font-size: 11.5px; border: 1px solid var(--line); }
+.safe-exit-controls button svg { width: 15px; height: 15px; }
+.safe-exit-door { flex: 1; padding: 0 9px; background: rgba(255, 255, 255, 0.055); color: #c9d6ee; }
+.safe-exit-door span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.safe-exit-door strong { color: var(--muted); font-size: 10px; letter-spacing: 0.08em; }
+.safe-exit-door.on { background: color-mix(in srgb, var(--accent) 24%, transparent); border-color: color-mix(in srgb, var(--accent) 58%, transparent); color: #fff; }
+.safe-exit-door.on strong { color: #b9d4ff; }
+.safe-exit-controls button:disabled { opacity: 0.45; cursor: not-allowed; }
+.safe-exit-start, .safe-exit-stop { padding: 0 12px; color: #fff; }
+.safe-exit-start { background: color-mix(in srgb, var(--ok) 20%, transparent); border-color: rgba(62, 224, 140, 0.35) !important; }
+.safe-exit-stop { background: rgba(255, 77, 77, 0.15); border-color: rgba(255, 77, 77, 0.35) !important; color: #ffc0c0 !important; }
+.safe-exit-metrics { display: grid; grid-template-columns: 0.65fr 1.7fr 0.7fr; gap: 6px; }
+.safe-exit-metrics div { min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 7px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); }
+.safe-exit-metrics small { color: var(--muted); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.07em; }
+.safe-exit-metrics b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #edf3ff; font-size: 12px; font-weight: 600; }
+.safe-exit-list { display: flex; flex-direction: column; gap: 6px; }
+.safe-exit-list-head { display: flex; align-items: baseline; gap: 8px; padding: 1px 2px; }
+.safe-exit-list-head span { flex: 1; color: #dfe9fb; font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+.safe-exit-list-head small { color: var(--muted); font-size: 9.5px; }
+.safe-exit-object { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.045); border: 1px solid transparent; }
+.safe-exit-object.candidate { background: rgba(255, 77, 91, 0.13); border-color: rgba(255, 92, 104, 0.42); }
+.safe-exit-object.risk { background: rgba(255, 184, 77, 0.12); border-color: rgba(255, 184, 77, 0.38); }
+.safe-exit-object-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--ok); box-shadow: 0 0 7px rgba(62, 224, 140, 0.65); }
+.safe-exit-object.candidate .safe-exit-object-dot { background: var(--danger); box-shadow: 0 0 8px rgba(255, 77, 77, 0.7); }
+.safe-exit-object.risk .safe-exit-object-dot { background: #ffc15c; box-shadow: 0 0 8px rgba(255, 193, 92, 0.72); }
+.safe-exit-object > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.safe-exit-object b { color: #ecf2ff; font-size: 12px; font-weight: 600; }
+.safe-exit-object em { color: var(--accent); font-style: normal; font-variant-numeric: tabular-nums; }
+.safe-exit-object small { color: var(--muted); font-size: 10px; text-transform: capitalize; }
+.safe-exit-object-state { color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: 0.08em; }
+.safe-exit-empty { margin: 0; padding: 9px; border-radius: 8px; background: rgba(255, 255, 255, 0.035); color: var(--muted); font-size: 11px; line-height: 1.4; }
+.safe-exit-settings-toggle { border-top: 1px solid var(--line); padding-top: 7px; }
+.safe-exit-settings-toggle button { width: 100%; display: flex; align-items: center; gap: 7px; min-height: 28px; color: #c9d6ee; text-align: left; font-size: 11px; }
+.safe-exit-settings-toggle button:hover { color: #fff; }
+.safe-exit-settings-toggle svg { width: 14px; height: 14px; color: var(--accent); }
+.safe-exit-settings-toggle span { flex: 1; }
+.safe-exit-settings-toggle strong { color: var(--muted); font-size: 10px; font-weight: 500; }
+.safe-exit-settings { display: flex; flex-direction: column; gap: 5px; padding: 4px 0 2px; }
+.safe-exit-range { display: grid; grid-template-columns: 1fr 1.1fr 38px; align-items: center; gap: 8px; min-height: 25px; font-size: 10.5px; }
+.safe-exit-range span { color: #c9d6ee; }
+.safe-exit-range input { width: 100%; accent-color: var(--accent); }
+.safe-exit-range em { color: var(--muted); font-size: 10px; font-style: normal; text-align: right; font-variant-numeric: tabular-nums; }
+.safe-exit-reset { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; margin-top: 3px; padding: 6px 9px; border-radius: 7px; background: rgba(255, 255, 255, 0.055); color: #c9d6ee; font-size: 10.5px; }
+.safe-exit-reset:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.safe-exit-reset svg { width: 12px; height: 12px; }
+.safe-exit-note { margin: 0; display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.safe-exit-note > svg { width: 14px; height: 14px; margin-bottom: -1px; color: var(--ok); }
+.safe-exit.warning .safe-exit-note { color: #ffd2d5; }
+.safe-exit.warning .safe-exit-note > svg { color: #ff818b; }
+.safe-exit-note span { color: #748096; }
+@media (max-width: 720px) {
+  .safe-exit { top: 64px; left: 16px; right: 16px; width: auto; max-height: calc(100vh - 80px); }
+}

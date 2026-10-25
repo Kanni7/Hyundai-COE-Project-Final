@@ -14,7 +14,15 @@ if (-not (Test-Path $py)) {
     & $py -m pip install -e (Join-Path $root 'backend')
 }
 
-if ($Rebuild -or -not (Test-Path (Join-Path $root 'frontend\dist\index.html'))) {
+$distIndex = Join-Path $root 'frontend\dist\index.html'
+$sourceDetectorModel = Join-Path $root 'frontend\public\mediapipe\efficientdet_lite0.tflite'
+$distDetectorModel = Join-Path $root 'frontend\dist\mediapipe\efficientdet_lite0.tflite'
+$modelNeedsBuild = (Test-Path $sourceDetectorModel) -and (
+    -not (Test-Path $distDetectorModel) -or
+    (Get-Item $sourceDetectorModel).LastWriteTimeUtc -gt (Get-Item $distDetectorModel).LastWriteTimeUtc
+)
+
+if ($Rebuild -or -not (Test-Path $distIndex) -or $modelNeedsBuild) {
     Write-Host '[setup] Building frontend...'
     Push-Location (Join-Path $root 'frontend')
     try {

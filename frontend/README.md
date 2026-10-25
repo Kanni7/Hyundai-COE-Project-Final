@@ -16,6 +16,7 @@ The default **Live view** is a cockpit drawn entirely in code (SVG), traced from
 npm install
 npm run dev        # http://localhost:5173
 npm run build      # production build in dist/
+npm test           # Safe Exit tracker and safety-decision tests
 ```
 
 Use Chrome or Edge for voice input, because they support the Web Speech API. Other browsers still accept typed commands.
@@ -31,6 +32,7 @@ Use Chrome or Edge for voice input, because they support the Web Speech API. Oth
 | **Screen** or <kbd>Z</kbd> (or double-click the display) | Moves the camera closer to the infotainment screen. |
 | **View** (layers icon) | Cycles through Live view (drawn cockpit), Night photo and Day photo. |
 | Speaker icon | Turns spoken replies on or off. |
+| **Safe Exit** | Opens the local webcam object-detection prototype. Start/stop the camera, press **Open Door** to exercise the simulated `CLOSED` / `OPEN` door, reset the demo, mute the warning chime, and adjust the image-space danger zone. |
 | Settings → Wind suppression | Turns the server-side filter on/off, adjusts strength and maximum reduction, controls browser capture suppression/AGC, and runs a clean-vs-synthetic-wind ASR comparison. |
 | Dashboard hotspots | Click the hazard button or the horn. Scroll on or click the climate temperatures. |
 
@@ -130,6 +132,7 @@ typed text ──────────────┴─▶ parseCommand()  �
   - The infotainment UI is real HTML. A homography (`lib/homography.ts`) maps it onto the photographed screen, so it stays clickable.
   - In the photo views, the ambient lighting is an SVG filter. It finds the blue LED strips in the photo and relights them in any colour.
   - There are animated airflow, rain and wiper effects, plus overlays for the climate LCD, the instrument cluster, the hazard light and headlights.
+- **Safe Exit Guardian** (`src/components/SafeExitGuardian.tsx`, `src/lib/objectTracking.ts`, `src/lib/safeExit.ts`): the browser captures webcam frames locally, MediaPipe ObjectDetector produces supported COCO detections, the class-aware tracker assigns short-lived stable IDs and image-space movement cues, and the pure safety engine warns only when a confirmed object is approaching and overlaps the configured image-space door zone. The simulated door always opens when requested; the warning is advisory and never blocks the door. Actual camera detections remain separate from the simulated door event; Reset only resets the simulated trial and temporal confirmation. The panel owns and releases its camera stream and does not send frames to the FastAPI voice backend.
 - **`src/lib/audio.ts`** synthesises royalty-free music live with Web Audio, so no audio files are needed. It also plays the horn and UI chimes. The engine note is a cross-plane V8 model: each camshaft cycle is built from eight exhaust pulses in firing order 1-8-7-2-6-5-4-3, whose uneven bank pattern gives the V8 burble. It adds combustion jitter, a load filter that opens with throttle, deep exhaust resonances, intake roar, overrun pops and a starter crank.
 - **`src/lib/engine.ts`** is a small engine and vehicle model. It covers throttle, inertia, the rev limiter and idle, plus a 7-speed automatic with kickdown, creep, Auto Hold, Smart Cruise, the odometer, trip and fuel use. It runs outside React. Every frame, it drives the cluster, the engine sound and the drive-linked ambient light.
 
@@ -138,5 +141,10 @@ typed text ──────────────┴─▶ parseCommand()  �
 - `public/images/verna-interior-dashboard.avif` is the Verna showroom interior (day view).
 - `public/images/hyundai-logo.webp` is the badge on the steering wheel (trimmed from `hyundai logo.png`).
 - `public/images/verna-night.webp` is the night-drive cabin (from `verna int.png`). It is the Night photo view, and the Live view uses it for the scenery outside the glass.
+- `public/mediapipe/efficientdet_lite0.tflite` is the local EfficientDet Lite0 float32 object-detection model used by Safe Exit Guardian. The model supports the labels used by the panel (`person`, `car`, `motorcycle`, `bicycle`, `bus`, `truck`) among its broader COCO label set.
 
 To use a different photo, add an entry to `src/scenes.ts` and calibrate it: the screen corners, vents, windshield outline and LED clip region, all in image pixels.
+
+### Safe Exit Guardian limitations
+
+This is a hackathon validation flow, not an automotive safety system. The danger zone is an image-space overlay, the tracker has no calibrated camera geometry or depth, and the warning only means that a supported model detection was repeatedly observed moving toward or expanding within the configured zone. Objects outside the zone, or objects that are stationary or moving away, do not trigger the warning. The simulated door is never blocked. Replace the laptop webcam with calibrated side/rear cameras, vehicle-network door state, camera mounting calibration, temporal sensor fusion, and a validated automotive perception stack before treating the feature as a genuine rear/side traffic safety system.
