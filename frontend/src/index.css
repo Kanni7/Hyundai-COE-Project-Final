@@ -766,8 +766,39 @@ img.layer { object-fit: fill; }
 .bc-speaker.live { border-color: rgba(255, 90, 90, 0.6); background: rgba(255, 77, 77, 0.06); }
 .bc-speaker-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .bc-speaker-head b { font-size: 14px; font-weight: 650; color: var(--c); letter-spacing: 0.04em; text-transform: uppercase; }
-.bc-speaker select { height: 32px; padding: 0 8px; border-radius: 9px; font: inherit; font-size: 13px; color: var(--text); background: rgba(255, 255, 255, 0.07); border: 1px solid var(--line-strong); }
-.bc-speaker select:disabled { opacity: 0.5; }
+.bc-speaker select {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ecf2ff;
+  background-color: #0b0f17;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color-scheme: dark;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.bc-speaker select:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.28);
+  background-color: #0f141f;
+}
+.bc-speaker select:focus {
+  outline: none;
+  border-color: var(--accent);
+  background-color: #080c13;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25);
+}
+.bc-speaker select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.bc-speaker select option {
+  background-color: #0b0f17;
+  color: #ecf2ff;
+  padding: 8px 12px;
+}
 .bc-ptt {
   position: relative; width: 76px; height: 76px; margin-top: 4px; border-radius: 50%; display: grid; place-items: center; color: #fff;
   background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--c) 70%, white), var(--c));
