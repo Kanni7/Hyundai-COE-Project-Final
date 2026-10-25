@@ -75,7 +75,7 @@ class Transcriber:
 
         # Primary: The EXACT same SarvamASR engine used by the premium assistant
         try:
-            transcript = self.assistant_asr.transcribe(audio, TARGET_SR)
+            transcript = self.assistant_asr.transcribe(audio, TARGET_SR, language_code=lang.tts)
             text = transcript.text.strip()
             if text:
                 return {

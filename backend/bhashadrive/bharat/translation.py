@@ -160,7 +160,16 @@ class GoogleTranslator:
         if self._client is not None:
             return self._translate_google(text, src, tgt, t0, out, key)
 
-        # 1. Primary: Groq LPU (Qwen 3.8 27B) - Same ultra-low latency & natural conversational AI as premium assistant
+        # 1. Primary: Direct Google Translate API (Production Google Engine)
+        google_translated = self._try_google(text, src, tgt)
+        if google_translated:
+            with self._lock:
+                self._cache[key] = google_translated
+                while len(self._cache) > self.cache_size:
+                    self._cache.popitem(last=False)
+            return {**out, "text": google_translated, "cached": False, "latency_s": round(time.perf_counter() - t0, 3)}
+
+        # 2. Secondary Fallback: Groq LPU (Qwen 3.8 27B) - High-speed conversational AI
         groq_key = os.environ.get("GROQ_API_KEY")
         if groq_key:
             try:
@@ -186,16 +195,7 @@ class GoogleTranslator:
                                 self._cache.popitem(last=False)
                         return {**out, "text": translated, "cached": False, "latency_s": round(time.perf_counter() - t0, 3)}
             except Exception as e:
-                print(f"[Bharat Translation] Groq Qwen translation failed ({e}). Falling back to Google.")
-
-        # 2. Secondary Fallback: Google Translate & Gemini
-        google_translated = self._try_google(text, src, tgt)
-        if google_translated:
-            with self._lock:
-                self._cache[key] = google_translated
-                while len(self._cache) > self.cache_size:
-                    self._cache.popitem(last=False)
-            return {**out, "text": google_translated, "cached": False, "latency_s": round(time.perf_counter() - t0, 3)}
+                print(f"[Bharat Translation] Groq fallback failed ({e}). Trying Sarvam.")
 
         # 3. Tertiary Fallback: Sarvam Mayura Translation
         sarvam_key = os.environ.get("SARVAM_API_KEY")

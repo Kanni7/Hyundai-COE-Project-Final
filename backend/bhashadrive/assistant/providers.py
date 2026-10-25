@@ -95,7 +95,7 @@ class SarvamASR:
         self.config = config
         self.client = client or httpx.Client()
 
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> Transcript:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language_code: str | None = None) -> Transcript:
         import soundfile as sf
 
         audio_s = len(audio) / sample_rate
@@ -103,8 +103,10 @@ class SarvamASR:
             raise ProviderError(self.name, "bad_audio", f"audio longer than {self.config.max_audio_s:g} s")
         buf = io.BytesIO()
         sf.write(buf, audio, sample_rate, format="WAV", subtype="PCM_16")
-        data = {"model": self.config.sarvam_model, "mode": self.config.sarvam_mode,
-                "language_code": self.config.sarvam_language}
+        target_lang = language_code or self.config.sarvam_language
+        target_mode = "transcribe" if (language_code and language_code != "unknown") else self.config.sarvam_mode
+        data = {"model": self.config.sarvam_model, "mode": target_mode, "language_code": target_lang}
+
         if self.config.sarvam_model == "saaras:v4":  # keyterms are a v4 feature
             data["keyterms"] = json.dumps(KEYTERMS)
         t0 = time.perf_counter()
