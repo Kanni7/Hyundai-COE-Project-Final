@@ -301,6 +301,237 @@ img.layer { object-fit: fill; }
 .eta-card.idle b { color: #fff; font-weight: 600; }
 .eta-card.idle button { background: rgba(255, 255, 255, 0.1); color: #fff; }
 
+/* --- Google Maps Automotive Cockpit Integration --- */
+.gmap-wrap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0b111e;
+  border-radius: inherit;
+}
+.gmap-wrap.mini {
+  pointer-events: none;
+}
+.gmap-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+  transition: filter 0.35s ease, opacity 0.3s ease;
+}
+/* Cockpit Night HUD: darkens standard Google Maps tiles to blend seamlessly into luxury automotive dark mode */
+.gmap-frame.night {
+  filter: invert(90%) hue-rotate(180deg) brightness(92%) contrast(88%) saturate(120%);
+}
+.gmap-frame.loading {
+  opacity: 0.6;
+}
+.gmap-mini-overlay {
+  position: absolute;
+  top: 0.6em;
+  left: 0.6em;
+  z-index: 2;
+  pointer-events: none;
+}
+.gmap-mini-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.3em 0.6em;
+  border-radius: 999px;
+  background: rgba(8, 14, 26, 0.88);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 0.72em;
+  font-weight: 600;
+  color: #f1f5f9;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.gmap-top-bar {
+  position: absolute;
+  top: 0.75em;
+  left: 0.75em;
+  right: 0.75em;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  z-index: 10;
+  pointer-events: auto;
+}
+.gmap-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.4em 0.75em;
+  border-radius: 999px;
+  background: rgba(10, 16, 30, 0.88);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 0.82em;
+  font-weight: 600;
+  color: #f1f5f9;
+  letter-spacing: 0.02em;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.gmap-live-dot {
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulse 1.6s ease-out infinite;
+}
+.gmap-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.4em 0.75em;
+  border-radius: 999px;
+  background: rgba(10, 16, 30, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #cbd5e1;
+  font-size: 0.8em;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+.gmap-btn:hover {
+  background: rgba(30, 41, 59, 0.95);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.gmap-btn.active {
+  background: rgba(59, 130, 246, 0.28);
+  border-color: #3b82f6;
+  color: #93c5fd;
+}
+.gmap-btn svg {
+  width: 1.1em;
+  height: 1.1em;
+}
+.gmap-side-controls {
+  position: absolute;
+  right: 0.75em;
+  top: 4.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45em;
+  z-index: 10;
+}
+.gmap-round-btn {
+  width: 2.3em;
+  height: 2.3em;
+  border-radius: 50%;
+  background: rgba(10, 16, 30, 0.9);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  transition: all 0.2s ease;
+}
+.gmap-round-btn:hover {
+  background: rgba(30, 41, 59, 0.98);
+  transform: scale(1.06);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.gmap-round-btn svg {
+  width: 1.15em;
+  height: 1.15em;
+}
+.gmap-search-bar {
+  position: absolute;
+  left: 0.75em;
+  right: 0.75em;
+  bottom: 0.75em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  z-index: 10;
+}
+.gmap-search-form {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  background: rgba(10, 16, 30, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.35em 0.8em;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+.gmap-search-form svg {
+  width: 1.2em;
+  height: 1.2em;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+.gmap-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f1f5f9;
+  font-size: 0.88em;
+  padding: 0.2em 0;
+}
+.gmap-search-input::placeholder {
+  color: #64748b;
+}
+.gmap-search-go {
+  background: var(--accent, #38bdf8);
+  color: #030712;
+  border: none;
+  border-radius: 999px;
+  padding: 0.25em 0.8em;
+  font-size: 0.78em;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.gmap-search-go:hover {
+  opacity: 0.9;
+}
+.gmap-chips {
+  display: flex;
+  gap: 0.4em;
+  overflow-x: auto;
+  padding-bottom: 0.1em;
+  scrollbar-width: none;
+}
+.gmap-chips::-webkit-scrollbar {
+  display: none;
+}
+.gmap-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  background: rgba(10, 16, 30, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 0.3em 0.7em;
+  color: #e2e8f0;
+  font-size: 0.75em;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+.gmap-chip:hover {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(255, 255, 255, 0.28);
+  transform: translateY(-1px);
+}
+
+
 .phone { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.35em; }
 .phone h2 { margin: 0.2em 0 0; font-weight: 500; font-size: 1.5em; }
 .phone p { margin: 0; color: #9aa7bf; font-variant-numeric: tabular-nums; }

@@ -311,8 +311,13 @@ function NavPage({ car, onIntent }: PageProps) {
   const eta = car.nav ? new Date(car.nav.startedAt + car.nav.minutes * 60000) : null;
   return (
     <div className="navpage">
-      <MapView destination={car.nav?.destination ?? null} />
-      {car.nav ? (
+      <MapView
+        destination={car.nav?.destination ?? null}
+        onNavigate={(dest) => onIntent({ type: 'nav.start', destination: dest })}
+        onStop={() => onIntent({ type: 'nav.stop' })}
+        navInfo={car.nav}
+      />
+      {car.nav && (
         <>
           <div className="turn-card"><CornerUpRight /><div><b>400 m</b><span>Turn right onto Outer Ring Rd</span></div></div>
           <div className="eta-card">
@@ -323,11 +328,6 @@ function NavPage({ car, onIntent }: PageProps) {
             <button onClick={() => onIntent({ type: 'nav.stop' })}>End</button>
           </div>
         </>
-      ) : (
-        <div className="eta-card idle">
-          <span>Say "<b>ghar le chalo</b>" or "<b>take me to the airport</b>"</span>
-          <button onClick={() => onIntent({ type: 'nav.start', destination: 'Home' })}><House /> Home</button>
-        </div>
       )}
     </div>
   );
