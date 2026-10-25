@@ -54,20 +54,23 @@ class GoogleTranslator:
         """Attempts Google translation via available Google APIs in priority order."""
         google_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_TRANSLATE_API_KEY")
 
-        # 1. Google Gemini API (if key provided)
+        # 1. Google Gemini (exact translation model)
         if google_key:
             try:
-                for model in ("gemini-2.0-flash", "gemini-1.5-flash"):
+                for model in ("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"):
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={google_key}"
                     payload = {
-                        "contents": [{
+                        "system_instruction": {
                             "parts": [{
-                                "text": f"Translate the following conversational speech from {src.name} to {tgt.name}. "
-                                        f"Use natural, polite, everyday spoken language in {tgt.name} script. "
-                                        f"Output ONLY the translated text, no quotes, no extra commentary:\n\n{text}"
+                                "text": f"You are the core translation engine of Google Translate. Translate the given spoken sentence from {src.name} to {tgt.name}. "
+                                        f"Output ONLY the translated sentence in {tgt.name} script ({tgt.native}). "
+                                        "Never include pronunciations, explanations, notes, markdown, or quotation marks."
                             }]
+                        },
+                        "contents": [{
+                            "parts": [{"text": text}]
                         }],
-                        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 300}
+                        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 300}
                     }
                     with httpx.Client(timeout=self.timeout_s) as client:
                         r = client.post(url, json=payload)
@@ -77,6 +80,9 @@ class GoogleTranslator:
                             parts = candidates[0].get("content", {}).get("parts", [])
                             if parts:
                                 out = parts[0].get("text", "").strip().strip('"\'`')
+                                # Strip conversational prefixes if any
+                                if "\n" in out:
+                                    out = out.split("\n")[-1].strip().strip('"\'`')
                                 if out:
                                     return out
             except Exception as e:
@@ -111,7 +117,7 @@ class GoogleTranslator:
             except Exception as e:
                 print(f"[Bharat Translation] Google Cloud v3 attempt failed: {e}")
 
-        # 4. Google Neural Translation Engine (built-in direct endpoint, zero-key)
+        # 4. Google Neural Translation Engine (built-in direct endpoint from translate.google.com)
         try:
             encoded_text = urllib.parse.quote(text)
             url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={src.code}&tl={tgt.code}&dt=t&q={encoded_text}"

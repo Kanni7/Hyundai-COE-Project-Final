@@ -38,7 +38,7 @@ class Transcriber:
         if self._factory is not None:
             return f"faster-whisper:{self.config.asr_model}"
         if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-            return "google:gemini-2.0-flash"
+            return "google:gemini-flash-lite-latest"
         if os.environ.get("SARVAM_API_KEY"):
             return "sarvam:saaras:v4"
         return f"faster-whisper:{self.config.asr_model}"
@@ -65,10 +65,10 @@ class Transcriber:
         if not google_key:
             return None
 
-        # 1. Google Gemini Multimodal Audio (gemini-2.0-flash, gemini-1.5-flash)
+        # 1. Google Gemini Multimodal Audio (gemini-flash-lite-latest, gemini-flash-latest, etc.)
         try:
             b64_audio = base64.b64encode(wav_bytes).decode("ascii")
-            for model in ("gemini-2.0-flash", "gemini-1.5-flash"):
+            for model in ("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"):
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={google_key}"
                 prompt = (
                     f"Transcribe this spoken audio verbatim in {lang.name}. "
@@ -99,6 +99,8 @@ class Transcriber:
                         parts = candidates[0].get("content", {}).get("parts", [])
                         if parts:
                             transcript = parts[0].get("text", "").strip().strip('"\'`')
+                            if "\n" in transcript:
+                                transcript = transcript.split("\n")[-1].strip().strip('"\'`')
                             if transcript:
                                 return transcript
         except Exception as e:
