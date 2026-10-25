@@ -391,7 +391,7 @@ img.layer { object-fit: fill; }
 .topbar > * { pointer-events: auto; }
 .scene-day .topbar { background: linear-gradient(to bottom, rgba(3, 5, 8, 0.82), rgba(3, 5, 8, 0.35) 70%, transparent); }
 .brand { display: flex; flex-direction: column; line-height: 1.1; }
-.brand-mark { font-size: 20px; font-weight: 700; letter-spacing: 0.32em; }
+.brand-mark { font-size: 20px; font-weight: 700; letter-spacing: 0.04em; }
 .brand-sub { font-size: 11px; color: #a7b1c3; letter-spacing: 0.14em; text-transform: uppercase; }
 .brand-sub i { color: var(--accent); font-style: normal; }
 .top-actions { display: flex; align-items: center; gap: 8px; }
