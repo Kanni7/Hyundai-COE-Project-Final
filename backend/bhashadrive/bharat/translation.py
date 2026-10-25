@@ -1,5 +1,5 @@
-"""Text translation for BharatConnect: Google Translation API (Gemini / Cloud Translate / Neural)
-with Groq LPU (Qwen 27B) and Sarvam Mayura fallbacks.
+"""Text translation for BharatConnect: Direct Google Translate API (Production Engine)
+with Google Gemini, Groq LPU (Qwen 27B), and Sarvam Mayura fallbacks.
 Translates conversational speech between Tamil, Hindi, Bengali, and English."""
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ Translate any conversational, casual, or general spoken dialogue between people:
 
 
 class GoogleTranslator:
-    """Translation engine: uses Google Translation (Gemini, Cloud Translation v2/v3, and Neural),
-    falling back to Groq LPU (Qwen 27B) and Sarvam Mayura."""
+    """Translation engine: uses Direct Google Translate API, Google Gemini,
+    Google Cloud Translation v3, falling back to Groq LPU (Qwen 27B) and Sarvam Mayura."""
 
     def __init__(self, project: str | None = None, timeout_s: float = 8.0, cache_size: int = 256, client=None):
         self.project, self.timeout_s, self.cache_size = project, timeout_s, cache_size
@@ -54,7 +54,24 @@ class GoogleTranslator:
         """Attempts Google translation via available Google APIs in priority order."""
         google_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_TRANSLATE_API_KEY")
 
-        # 1. Google Gemini (exact translation model)
+        # 1. Primary: Direct Google Translate API (Google Chrome Translation Engine)
+        try:
+            encoded_text = urllib.parse.quote(text)
+            url = f"https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl={src.code}&tl={tgt.code}&q={encoded_text}"
+            with httpx.Client(timeout=self.timeout_s) as client:
+                r = client.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list) and data:
+                    out = str(data[0]).strip().strip('"\'`')
+                    if out:
+                        return out
+                elif isinstance(data, str) and data.strip():
+                    return data.strip().strip('"\'`')
+        except Exception as e:
+            print(f"[Bharat Translation] Direct Google Translate attempt failed: {e}")
+
+        # 2. Secondary: Google Gemini (Exact conversational translation)
         if google_key:
             try:
                 for model in ("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"):
@@ -62,7 +79,7 @@ class GoogleTranslator:
                     payload = {
                         "system_instruction": {
                             "parts": [{
-                                "text": f"You are the core translation engine of Google Translate. Translate the given spoken sentence from {src.name} to {tgt.name}. "
+                                "text": f"You are the exact translation engine of Google Translate. Translate the given spoken sentence from {src.name} to {tgt.name}. "
                                         f"Output ONLY the translated sentence in {tgt.name} script ({tgt.native}). "
                                         "Never include pronunciations, explanations, notes, markdown, or quotation marks."
                             }]
@@ -80,7 +97,6 @@ class GoogleTranslator:
                             parts = candidates[0].get("content", {}).get("parts", [])
                             if parts:
                                 out = parts[0].get("text", "").strip().strip('"\'`')
-                                # Strip conversational prefixes if any
                                 if "\n" in out:
                                     out = out.split("\n")[-1].strip().strip('"\'`')
                                 if out:
@@ -88,7 +104,7 @@ class GoogleTranslator:
             except Exception as e:
                 print(f"[Bharat Translation] Gemini translation attempt failed: {e}")
 
-            # 2. Google Cloud Translation v2 REST
+            # 3. Google Cloud Translation v2 REST
             try:
                 url = f"https://translation.googleapis.com/language/translate/v2?key={google_key}"
                 payload = {"q": [text], "source": src.code, "target": tgt.code, "format": "text"}
@@ -103,7 +119,7 @@ class GoogleTranslator:
             except Exception as e:
                 print(f"[Bharat Translation] Google Cloud Translate v2 attempt failed: {e}")
 
-        # 3. Google Cloud Translation v3 (Service Account client)
+        # 4. Google Cloud Translation v3 (Service Account client)
         if self.project:
             try:
                 client = self._get_client()
@@ -116,21 +132,6 @@ class GoogleTranslator:
                         return out
             except Exception as e:
                 print(f"[Bharat Translation] Google Cloud v3 attempt failed: {e}")
-
-        # 4. Google Neural Translation Engine (built-in direct endpoint from translate.google.com)
-        try:
-            encoded_text = urllib.parse.quote(text)
-            url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={src.code}&tl={tgt.code}&dt=t&q={encoded_text}"
-            with httpx.Client(timeout=self.timeout_s) as client:
-                r = client.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-            if r.status_code == 200:
-                data = r.json()
-                if data and isinstance(data, list) and data[0]:
-                    out = "".join(part[0] for part in data[0] if part and part[0]).strip()
-                    if out:
-                        return out
-        except Exception as e:
-            print(f"[Bharat Translation] Google Neural Translate attempt failed: {e}")
 
         return None
 
@@ -153,7 +154,7 @@ class GoogleTranslator:
         if self._client is not None:
             return self._translate_google(text, src, tgt, t0, out, key)
 
-        # 1. Primary: Google's Translation Engine (Gemini / Cloud Translation / Google Neural)
+        # 1. Primary: Direct Google Translate API
         google_translated = self._try_google(text, src, tgt)
         if google_translated:
             with self._lock:

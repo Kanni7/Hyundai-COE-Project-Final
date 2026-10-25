@@ -1,5 +1,5 @@
-"""Speech recognition for BharatConnect: Google Speech API (Gemini Multimodal / Cloud Speech)
-with Sarvam Saaras v4 and Faster-Whisper fallbacks."""
+"""Speech recognition for BharatConnect: Sarvam Saaras v4 (primary Indian ASR)
+with Google Speech API (Gemini Multimodal) and Faster-Whisper fallbacks."""
 from __future__ import annotations
 
 import base64
@@ -29,18 +29,18 @@ class Transcriber:
 
     @property
     def loaded(self) -> bool:
-        has_google = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
         has_sarvam = bool(os.environ.get("SARVAM_API_KEY"))
-        return has_google or has_sarvam or (self._asr is not None)
+        has_google = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+        return has_sarvam or has_google or (self._asr is not None)
 
     @property
     def model(self) -> str:
         if self._factory is not None:
             return f"faster-whisper:{self.config.asr_model}"
-        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-            return "google:gemini-flash-lite-latest"
         if os.environ.get("SARVAM_API_KEY"):
             return "sarvam:saaras:v4"
+        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+            return "google:gemini-flash-lite-latest"
         return f"faster-whisper:{self.config.asr_model}"
 
     def load(self):
@@ -54,7 +54,7 @@ class Transcriber:
                         self._factory = FasterWhisperASR
                     self._asr = self._factory(cfg)
                 except Exception as exc:
-                    has_cloud = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("SARVAM_API_KEY"))
+                    has_cloud = bool(os.environ.get("SARVAM_API_KEY") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
                     if not has_cloud:
                         raise ServiceError("transcribing", f"Speech recognition could not load: {exc}", 503, False) from exc
         return self._asr
@@ -65,7 +65,7 @@ class Transcriber:
         if not google_key:
             return None
 
-        # 1. Google Gemini Multimodal Audio (gemini-flash-lite-latest, gemini-flash-latest, etc.)
+        # 1. Google Gemini Multimodal Audio
         try:
             b64_audio = base64.b64encode(wav_bytes).decode("ascii")
             for model in ("gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"):
@@ -141,7 +141,7 @@ class Transcriber:
         google_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
         # If Fake factory is provided (unit tests) or no cloud keys, use local ASR
-        if self._factory is not None or (not google_key and not sarvam_key):
+        if self._factory is not None or (not sarvam_key and not google_key):
             return self._transcribe_local(path, lang)
 
         # Preprocess and peak-normalize audio so faint mic input is properly recognized
@@ -166,19 +166,7 @@ class Transcriber:
 
         t0 = time.perf_counter()
 
-        # 1. Primary: Google Speech Recognition (Gemini Multimodal / Cloud Speech)
-        if google_key:
-            google_text = self._try_google_stt(audio, wav_bytes, lang)
-            if google_text:
-                return {
-                    "text": google_text,
-                    "language": lang.code,
-                    "status": "ok",
-                    "duration_s": round(audio_s, 2),
-                    "latency_s": round(time.perf_counter() - t0, 3)
-                }
-
-        # 2. Secondary Fallback: Sarvam Saaras v4 (clean conversational speech, no car biasing)
+        # 1. Primary: Sarvam Saaras v4 (dedicated Indian language STT, ~0.3s, clean, no car biasing)
         if sarvam_key:
             try:
                 headers = {"api-subscription-key": sarvam_key}
@@ -202,7 +190,19 @@ class Transcriber:
                             "latency_s": round(time.perf_counter() - t0, 3)
                         }
             except Exception as e:
-                print(f"[Bharat ASR] Sarvam transcription failed ({e}). Falling back to local.")
+                print(f"[Bharat ASR] Sarvam transcription failed ({e}). Trying Google.")
+
+        # 2. Secondary Fallback: Google Gemini Audio STT
+        if google_key:
+            google_text = self._try_google_stt(audio, wav_bytes, lang)
+            if google_text:
+                return {
+                    "text": google_text,
+                    "language": lang.code,
+                    "status": "ok",
+                    "duration_s": round(audio_s, 2),
+                    "latency_s": round(time.perf_counter() - t0, 3)
+                }
 
         return self._transcribe_local(path, lang)
 
