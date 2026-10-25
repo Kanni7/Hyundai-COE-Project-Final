@@ -63,7 +63,7 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
     setMicError(null);
     let r: Awaited<ReturnType<typeof recordAudio>>;
     try {
-      r = await recordAudio(15000, 900); // ends on a pause after speech, a second tap, or 15 s
+      r = await recordAudio(20000, 1800, { autoGainControl: true }); // ends on a natural pause (1.8s) after speech, a second tap, or 20 s
     } catch {
       setMicError('The microphone is blocked or unavailable. Allow microphone access and try again.');
       return;
