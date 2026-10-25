@@ -25,7 +25,7 @@ const secs = (ms?: number) => (ms === undefined ? '–' : `${(ms / 1000).toFixed
 export function BharatConnect({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<BharatStatus | null>(null);
   const [offline, setOffline] = useState(false);
-  const [langs, setLangs] = useState<Record<Speaker, Lang>>({ driver: 'ta', passenger: 'hi' });
+  const [langs, setLangs] = useState<Record<Speaker, Lang>>({ driver: 'hi', passenger: 'en' });
   const [turns, setTurns] = useState<Turn[]>([]);
   const [rec, setRec] = useState<{ speaker: Speaker; stop: () => Promise<Blob> } | null>(null);
   const [busy, setBusy] = useState<number | null>(null);

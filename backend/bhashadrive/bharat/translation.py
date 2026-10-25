@@ -15,11 +15,13 @@ from .languages import language
 
 SERVICE = "BharatConnect Translation"
 
-PROMPT_SYSTEM = """You are an expert bilingual interpreter for BharatConnect.
-Translate any conversational, casual, or general spoken dialogue between people:
-1. Translate the true meaning into natural, fluent, everyday spoken language (NOT literal word-by-word translation).
-2. Use colloquial phrasing commonly spoken in India. BharatConnect handles general everyday conversations, casual chats, travel remarks, questions, and personal dialogue.
-3. Output ONLY the translated sentence in the target language's script, with no explanation, no markdown, and no quotation marks."""
+PROMPT_SYSTEM = """You are the ultra-fast real-time translator for BharatConnect in a Hyundai smart car.
+Translate the speaker's dialogue accurately, naturally, and conversationally into the target language.
+Rules:
+1. Understand colloquial Indian English, Hindi, Hinglish, Tamil, and Bengali conversational dialogue.
+2. For in-car dialogue or commands (e.g. 'AC on kar do', 'volume badha do', 'aage se left lena', 'kitna time lagega'), translate the true intended meaning into everyday natural speech.
+3. Output ONLY the translated sentence in the target language's standard script (Devanagari for Hindi, Tamil script for Tamil, Bengali script for Bengali, Latin for English).
+4. Never output explanations, notes, phonetic spellings, or quotation marks."""
 
 
 class GoogleTranslator:
@@ -57,13 +59,17 @@ class GoogleTranslator:
         # 1. Primary: Direct Google Translate API (Google Chrome Translation Engine)
         try:
             encoded_text = urllib.parse.quote(text)
-            url = f"https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl={src.code}&tl={tgt.code}&q={encoded_text}"
+            url = f"https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl={tgt.code}&q={encoded_text}"
             with httpx.Client(timeout=self.timeout_s) as client:
                 r = client.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
             if r.status_code == 200:
                 data = r.json()
                 if isinstance(data, list) and data:
-                    out = str(data[0]).strip().strip('"\'`')
+                    first = data[0]
+                    if isinstance(first, list) and first:
+                        out = str(first[0]).strip().strip('"\'`')
+                    else:
+                        out = str(first).strip().strip('"\'`')
                     if out:
                         return out
                 elif isinstance(data, str) and data.strip():
@@ -154,16 +160,7 @@ class GoogleTranslator:
         if self._client is not None:
             return self._translate_google(text, src, tgt, t0, out, key)
 
-        # 1. Primary: Direct Google Translate API
-        google_translated = self._try_google(text, src, tgt)
-        if google_translated:
-            with self._lock:
-                self._cache[key] = google_translated
-                while len(self._cache) > self.cache_size:
-                    self._cache.popitem(last=False)
-            return {**out, "text": google_translated, "cached": False, "latency_s": round(time.perf_counter() - t0, 3)}
-
-        # 2. Secondary Fallback: Groq LPU (Qwen 27B)
+        # 1. Primary: Groq LPU (Qwen 3.8 27B) - Same ultra-low latency & natural conversational AI as premium assistant
         groq_key = os.environ.get("GROQ_API_KEY")
         if groq_key:
             try:
@@ -171,9 +168,10 @@ class GoogleTranslator:
                     "model": "qwen/qwen3.8-27b",
                     "messages": [
                         {"role": "system", "content": PROMPT_SYSTEM},
-                        {"role": "user", "content": f"Translate from {src.name} to {tgt.name}: {text}"}
+                        {"role": "user", "content": f"Translate from {src.name} to {tgt.name}:\n{text}"}
                     ],
-                    "temperature": 0.1
+                    "temperature": 0.0,
+                    "max_tokens": 150
                 }
                 headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
                 with httpx.Client(timeout=self.timeout_s) as client:
@@ -188,7 +186,16 @@ class GoogleTranslator:
                                 self._cache.popitem(last=False)
                         return {**out, "text": translated, "cached": False, "latency_s": round(time.perf_counter() - t0, 3)}
             except Exception as e:
-                print(f"[Bharat Translation] Groq fallback failed ({e}). Trying Sarvam.")
+                print(f"[Bharat Translation] Groq Qwen translation failed ({e}). Falling back to Google.")
+
+        # 2. Secondary Fallback: Google Translate & Gemini
+        google_translated = self._try_google(text, src, tgt)
+        if google_translated:
+            with self._lock:
+                self._cache[key] = google_translated
+                while len(self._cache) > self.cache_size:
+                    self._cache.popitem(last=False)
+            return {**out, "text": google_translated, "cached": False, "latency_s": round(time.perf_counter() - t0, 3)}
 
         # 3. Tertiary Fallback: Sarvam Mayura Translation
         sarvam_key = os.environ.get("SARVAM_API_KEY")

@@ -81,8 +81,8 @@ def bharat_router(s: BharatServices) -> APIRouter:
                 out = s.transcriber.transcribe_file(p, language_code)
             except (ServiceError, ValueError) as e:
                 _fail(e)
-        print(f"[API /bharat/transcribe] {language_code} {out['duration_s']}s audio -> {len(out['text'])} chars "
-              f"({out['status']}) in {out['latency_s']}s")
+        print(f"[API /bharat/transcribe] {language_code} {out['duration_s']}s audio -> '{out.get('text')}' (detected: {out.get('language')}) in {out['latency_s']}s")
+
         return out
 
     @r.post("/translate")
@@ -91,7 +91,7 @@ def bharat_router(s: BharatServices) -> APIRouter:
             out = s.translator.translate(body.text, body.source, body.target)
         except (ServiceError, ValueError) as e:
             _fail(e)
-        print(f"[API /bharat/translate] {body.source}->{body.target} {len(body.text)} chars in {out['latency_s']}s"
+        print(f"[API /bharat/translate] {body.source}->{body.target} '{body.text}' -> '{out.get('text')}' in {out['latency_s']}s"
               f"{' (cached)' if out['cached'] else ''}")
         return out
 

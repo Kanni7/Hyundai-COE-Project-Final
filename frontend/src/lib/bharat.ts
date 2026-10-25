@@ -78,16 +78,16 @@ export const bharat = {
   warmup: () => fetch(`${API}/bharat/warmup`, { method: 'POST' }).catch(() => undefined),
 };
 
-async function transcribe(audio: Blob, lang: Lang): Promise<string> {
+async function transcribe(audio: Blob, lang: Lang): Promise<{ text: string; language?: string }> {
   const fd = new FormData();
   const ext = audio.type.includes('mp4') ? 'mp4' : audio.type.includes('ogg') ? 'ogg' : 'webm';
   fd.append('file', audio, `turn.${ext}`);
   fd.append('language', lang);
-  const r: { text: string; status: string } = await (await request('transcribing', '/transcribe', { method: 'POST', body: fd }, 60000)).json();
+  const r: { text: string; status: string; language?: string } = await (await request('transcribing', '/transcribe', { method: 'POST', body: fd }, 60000)).json();
   if (!r.text.trim()) {
     throw new StageError({ stage: 'transcribing', message: 'No speech was heard. Hold the button closer and speak again.', retryable: false });
   }
-  return r.text.trim();
+  return { text: r.text.trim(), language: r.language };
 }
 
 async function translate(text: string, source: Lang, target: Lang): Promise<string> {
@@ -115,11 +115,22 @@ export async function runTurn(turn: Turn, from: Stage, endedAt: number, update: 
   try {
     if (from === 'transcribing') {
       set({ status: 'transcribing' });
-      set({ original: await timed('asr', () => transcribe(t.recording!, t.source)) });
+      const asr = await timed('asr', () => transcribe(t.recording!, t.source));
+      t.original = asr.text;
+      set({ original: asr.text });
+      if (asr.language) {
+        const detected = asr.language.split('-')[0] as Lang;
+        if (['hi', 'ta', 'en', 'bn'].includes(detected)) {
+          t.source = detected;
+          set({ source: detected });
+        }
+      }
     }
     if (from !== 'generating_audio') {
       set({ status: 'translating' });
-      set({ translated: await timed('translate', () => translate(t.original!, t.source, t.target)) });
+      const targetLang = t.source === t.target ? (t.target === 'en' ? 'hi' : 'en') : t.target;
+      t.target = targetLang;
+      set({ translated: await timed('translate', () => translate(t.original!, t.source, targetLang)), target: targetLang });
     }
     set({ status: 'generating_audio' });
     set({ speech: await timed('tts', () => speak(t.translated!, t.target)) });
