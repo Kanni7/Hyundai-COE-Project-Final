@@ -59,9 +59,12 @@ class Transcriber:
         lang = language(lang_code)
         sarvam_key = os.environ.get("SARVAM_API_KEY")
 
-        # If Fake factory is provided (unit tests) or no Sarvam key, use local ASR
-        if self._factory is not None or not sarvam_key:
+        # If Fake factory is provided (unit tests)
+        if self._factory is not None:
             return self._transcribe_local(path, lang)
+
+        if not sarvam_key:
+            raise ServiceError("transcribing", "SARVAM_API_KEY is not configured for cloud speech recognition.", 503, False)
 
         try:
             audio = decode_file(path, TARGET_SR)
@@ -73,7 +76,7 @@ class Transcriber:
         except Exception as exc:
             raise ServiceError("transcribing", f"Could not read the recording: {exc}", 400, False) from exc
 
-        # Primary: The EXACT same SarvamASR engine used by the premium assistant
+        # Pure Cloud STT: The EXACT same Sarvam Saaras v4 STT flow as the premium assistant
         try:
             transcript = self.assistant_asr.transcribe(audio, TARGET_SR)
             text = transcript.text.strip()
@@ -85,11 +88,9 @@ class Transcriber:
                 "latency_s": transcript.latency_s
             }
         except ProviderError as e:
-            print(f"[Bharat ASR] Premium SarvamASR failed ({e}). Falling back to local.")
+            raise ServiceError("transcribing", f"Cloud speech recognition failed ({e.kind}).", 502, True) from e
         except Exception as e:
-            print(f"[Bharat ASR] Sarvam transcription error ({e}). Falling back to local.")
-
-        return self._transcribe_local(path, lang)
+            raise ServiceError("transcribing", f"Cloud speech recognition error: {e}", 502, True) from e
 
     def _transcribe_local(self, path: Path, lang) -> dict:
         try:
