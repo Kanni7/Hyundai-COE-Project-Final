@@ -38,6 +38,7 @@ ENV BD_ASR_LOCAL_ONLY=true
 ENV BD_HYBRID_CLOUD_ASR=true
 ENV BD_SHERPA_EXTRA_MODEL_DIRS=""
 ENV BD_DEV_DEFAULT_TIER=premium
+ENV BD_DEV_TIER_SWITCH=true
 ENV BD_NLU_ARTIFACTS=artifacts/nlu/runtime
 ENV BD_PERSONAL_THRESHOLDS=artifacts/personalization.json
 ENV BD_PROFILE_DB=data/profiles/bhashadrive.sqlite
