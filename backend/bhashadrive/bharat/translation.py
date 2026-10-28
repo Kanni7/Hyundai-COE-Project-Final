@@ -1,6 +1,7 @@
 """Text translation for BharatConnect: Direct Google Translate API (Production Engine)
-with Google Gemini, Groq LPU (Qwen 27B), and Sarvam Mayura fallbacks.
-Translates conversational speech between Tamil, Hindi, Bengali, and English."""
+with Google Gemini, Sarvam-Translate and Groq LPU (Qwen 27B) fallbacks.
+Translates conversational speech between English and the 22 scheduled languages of India; Google does not
+offer Bodo, Kashmiri or Santali, so those go straight to Sarvam-Translate."""
 from __future__ import annotations
 
 import os
@@ -18,9 +19,9 @@ SERVICE = "BharatConnect Translation"
 PROMPT_SYSTEM = """You are the ultra-fast real-time translator for BharatConnect in a Hyundai smart car.
 Translate the speaker's dialogue accurately, naturally, and conversationally into the target language.
 Rules:
-1. Understand colloquial Indian English, Hindi, Hinglish, Tamil, and Bengali conversational dialogue.
+1. Understand colloquial Indian English, Hinglish and conversational dialogue in any Indian language.
 2. For in-car dialogue or commands (e.g. 'AC on kar do', 'volume badha do', 'aage se left lena', 'kitna time lagega'), translate the true intended meaning into everyday natural speech.
-3. Output ONLY the translated sentence in the target language's standard script (Devanagari for Hindi, Tamil script for Tamil, Bengali script for Bengali, Latin for English).
+3. Output ONLY the translated sentence in the target language's standard script (e.g. Devanagari for Hindi, Tamil script for Tamil, Latin for English).
 4. Never output explanations, notes, phonetic spellings, or quotation marks."""
 
 
@@ -54,12 +55,14 @@ class GoogleTranslator:
 
     def _try_google(self, text: str, src, tgt) -> str | None:
         """Attempts Google translation via available Google APIs in priority order."""
+        if src.google is None or tgt.google is None:
+            return None  # a language Google does not offer
         google_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_TRANSLATE_API_KEY")
 
         # 1. Primary: Direct Google Translate API (Google Chrome Translation Engine)
         try:
             encoded_text = urllib.parse.quote(text)
-            url = f"https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl={tgt.code}&q={encoded_text}"
+            url = f"https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl={tgt.google}&q={encoded_text}"
             with httpx.Client(timeout=self.timeout_s) as client:
                 r = client.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
             if r.status_code == 200:
@@ -113,7 +116,7 @@ class GoogleTranslator:
             # 3. Google Cloud Translation v2 REST
             try:
                 url = f"https://translation.googleapis.com/language/translate/v2?key={google_key}"
-                payload = {"q": [text], "source": src.code, "target": tgt.code, "format": "text"}
+                payload = {"q": [text], "source": src.google, "target": tgt.google, "format": "text"}
                 with httpx.Client(timeout=self.timeout_s) as client:
                     r = client.post(url, json=payload)
                 if r.status_code == 200:
@@ -131,7 +134,7 @@ class GoogleTranslator:
                 client = self._get_client()
                 resp = client.translate_text(request={
                     "parent": f"projects/{self.project}/locations/global", "contents": [text], "mime_type": "text/plain",
-                    "source_language_code": src.code, "target_language_code": tgt.code}, timeout=self.timeout_s)
+                    "source_language_code": src.google, "target_language_code": tgt.google}, timeout=self.timeout_s)
                 if resp.translations:
                     out = resp.translations[0].translated_text.strip()
                     if out:
@@ -169,7 +172,31 @@ class GoogleTranslator:
                     self._cache.popitem(last=False)
             return {**out, "text": google_translated, "cached": False, "latency_s": round(time.perf_counter() - t0, 3)}
 
-        # 2. Secondary Fallback: Groq LPU (Qwen 3.8 27B) - High-speed conversational AI
+        # 2. Secondary Fallback: Sarvam-Translate (all 22 scheduled languages)
+        sarvam_key = os.environ.get("SARVAM_API_KEY")
+        if sarvam_key:
+            try:
+                payload = {
+                    "input": text,
+                    "source_language_code": src.sarvam,
+                    "target_language_code": tgt.sarvam,
+                    "model": "sarvam-translate:v1"
+                }
+                headers = {"api-subscription-key": sarvam_key, "Content-Type": "application/json"}
+                with httpx.Client(timeout=self.timeout_s) as client:
+                    resp = client.post("https://api.sarvam.ai/translate", headers=headers, json=payload)
+                if resp.status_code == 200:
+                    translated = resp.json().get("translated_text", "").strip()
+                    if translated:
+                        with self._lock:
+                            self._cache[key] = translated
+                            while len(self._cache) > self.cache_size:
+                                self._cache.popitem(last=False)
+                        return {**out, "text": translated, "cached": False, "latency_s": round(time.perf_counter() - t0, 3)}
+            except Exception as e:
+                print(f"[Bharat Translation] Sarvam-Translate fallback failed ({e}). Trying Groq.")
+
+        # 3. Tertiary Fallback: Groq LPU (Qwen 3.8 27B) - High-speed conversational AI
         groq_key = os.environ.get("GROQ_API_KEY")
         if groq_key:
             try:
@@ -195,31 +222,7 @@ class GoogleTranslator:
                                 self._cache.popitem(last=False)
                         return {**out, "text": translated, "cached": False, "latency_s": round(time.perf_counter() - t0, 3)}
             except Exception as e:
-                print(f"[Bharat Translation] Groq fallback failed ({e}). Trying Sarvam.")
-
-        # 3. Tertiary Fallback: Sarvam Mayura Translation
-        sarvam_key = os.environ.get("SARVAM_API_KEY")
-        if sarvam_key:
-            try:
-                payload = {
-                    "input": text,
-                    "source_language_code": src.tts,
-                    "target_language_code": tgt.tts,
-                    "model": "mayura:v1"
-                }
-                headers = {"api-subscription-key": sarvam_key, "Content-Type": "application/json"}
-                with httpx.Client(timeout=self.timeout_s) as client:
-                    resp = client.post("https://api.sarvam.ai/translate", headers=headers, json=payload)
-                if resp.status_code == 200:
-                    translated = resp.json().get("translated_text", "").strip()
-                    if translated:
-                        with self._lock:
-                            self._cache[key] = translated
-                            while len(self._cache) > self.cache_size:
-                                self._cache.popitem(last=False)
-                        return {**out, "text": translated, "cached": False, "latency_s": round(time.perf_counter() - t0, 3)}
-            except Exception as e:
-                print(f"[Bharat Translation] Sarvam Mayura fallback failed ({e}).")
+                print(f"[Bharat Translation] Groq fallback failed ({e}).")
 
         raise ServiceError("translating", "Translation service unavailable.", 502)
 
@@ -228,7 +231,7 @@ class GoogleTranslator:
         try:
             resp = client.translate_text(request={
                 "parent": f"projects/{self.project}/locations/global", "contents": [text], "mime_type": "text/plain",
-                "source_language_code": src.code, "target_language_code": tgt.code}, timeout=self.timeout_s)
+                "source_language_code": src.google, "target_language_code": tgt.google}, timeout=self.timeout_s)
         except Exception as exc:
             raise google_error("translating", "Google Cloud Translation", exc) from exc
         translated = resp.translations[0].translated_text if resp.translations else ""

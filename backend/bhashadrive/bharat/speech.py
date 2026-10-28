@@ -1,5 +1,6 @@
 """Speech recognition for BharatConnect: uses the EXACT same SarvamASR (Saaras v4) engine
-from the premium voice assistant feature, with Faster-Whisper fallback."""
+from the premium voice assistant feature, with Faster-Whisper fallback. Without a language it detects the one
+spoken (any of the 22 scheduled languages or English) and reports it."""
 from __future__ import annotations
 
 import os
@@ -10,7 +11,7 @@ from ..assistant.providers import ProviderError, SarvamASR
 from ..audio.preprocessing import TARGET_SR, decode_file
 from ..config import ASRConfig, AssistantConfig, BharatConfig
 from .errors import ServiceError
-from .languages import language
+from .languages import Language, detected, language
 
 
 class Transcriber:
@@ -45,6 +46,7 @@ class Transcriber:
             if self._asr is None:
                 cfg = ASRConfig()
                 cfg.model_size = self.config.asr_model
+                cfg.language = None  # the in-car default forces English; here an unset language means detect it
                 try:
                     if self._factory is None:
                         from ..audio.asr import FasterWhisperASR
@@ -55,8 +57,9 @@ class Transcriber:
                         raise ServiceError("transcribing", f"Speech recognition could not load: {exc}", 503, False) from exc
         return self._asr
 
-    def transcribe_file(self, path: Path, lang_code: str) -> dict:
-        lang = language(lang_code)
+    def transcribe_file(self, path: Path, lang_code: str | None = None) -> dict:
+        """`lang_code` None: detect the spoken language. The result's `language` is our code for it."""
+        lang = language(lang_code) if lang_code else None
         sarvam_key = os.environ.get("SARVAM_API_KEY")
 
         # If Fake factory is provided (unit tests)
@@ -78,11 +81,11 @@ class Transcriber:
 
         # Pure Cloud STT: The EXACT same Sarvam Saaras v4 STT flow as the premium assistant
         try:
-            transcript = self.assistant_asr.transcribe(audio, TARGET_SR)
+            transcript = self.assistant_asr.transcribe(audio, TARGET_SR, lang.sarvam if lang else "unknown")
             text = transcript.text.strip()
             return {
                 "text": text,
-                "language": lang.code,
+                "language": self._language(lang, transcript.language, text),
                 "status": "ok" if text else "silence",
                 "duration_s": round(audio_s, 2),
                 "latency_s": transcript.latency_s
@@ -92,7 +95,16 @@ class Transcriber:
         except Exception as e:
             raise ServiceError("transcribing", f"Cloud speech recognition error: {e}", 502, True) from e
 
-    def _transcribe_local(self, path: Path, lang) -> dict:
+    @staticmethod
+    def _language(asked: Language | None, reported: str | None, text: str) -> str | None:
+        if asked is not None:
+            return asked.code
+        found = detected(reported)
+        if found is None and text:
+            raise ServiceError("transcribing", "Could not tell which language was spoken. Speak again.", 422, False)
+        return found.code if found else None
+
+    def _transcribe_local(self, path: Path, lang: Language | None) -> dict:
         try:
             audio = decode_file(path, TARGET_SR)
         except Exception as exc:
@@ -101,8 +113,8 @@ class Transcriber:
             raise ServiceError("transcribing", f"Recording longer than {self.config.max_audio_s:g} s.", 413, False)
         asr = self.load()
         with self._lock:
-            res = asr.transcribe_verbatim(audio, lang.whisper)
+            res = asr.transcribe_verbatim(audio, lang.whisper if lang else None)
         if res.status == "error":
             raise ServiceError("transcribing", res.error or "Speech recognition failed.", 502)
-        return {"text": res.text, "language": lang.code, "status": res.status,
+        return {"text": res.text, "language": self._language(lang, res.language, res.text), "status": res.status,
                 "duration_s": res.duration_s, "latency_s": res.latency_s}
