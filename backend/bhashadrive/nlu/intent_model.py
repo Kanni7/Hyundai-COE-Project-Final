@@ -47,14 +47,27 @@ class IntentModel:
         if not heads_path.is_file():
             raise EncoderUnavailableError(f"Classifier heads not found: {heads_path}")
         enc = manifest["encoder"]
-        if enc.get("onnx") and (root / enc["onnx"]).is_file():
-            encoder = OnnxSentenceEncoder(root / enc["onnx"], root / enc["tokenizer_dir"], threads=threads)
+        onnx_path = root / enc.get("onnx", "")
+        # Prefer INT8 ONNX if available for fast inference and <512MB RAM on free-tier containers
+        if onnx_path.with_name("model.int8.onnx").is_file():
+            onnx_path = onnx_path.with_name("model.int8.onnx")
+        elif (root / "models" / "onnx" / "minilm" / "model.int8.onnx").is_file():
+            onnx_path = root / "models" / "onnx" / "minilm" / "model.int8.onnx"
+
+        tok_dir = root / enc.get("tokenizer_dir", "")
+        if not (tok_dir / "tokenizer.json").is_file():
+            alt_tok = root / "models" / "encoders" / "paraphrase-multilingual-MiniLM-L12-v2"
+            if (alt_tok / "tokenizer.json").is_file():
+                tok_dir = alt_tok
+
+        if onnx_path.is_file() and (tok_dir / "tokenizer.json").is_file():
+            encoder = OnnxSentenceEncoder(onnx_path, tok_dir, threads=threads)
         elif enc.get("dir") and (root / enc["dir"]).exists():
             from .encoder import TorchSentenceEncoder
             encoder = TorchSentenceEncoder(root / enc["dir"])
-        elif enc.get("tokenizer_dir") and (root / enc["tokenizer_dir"]).exists():
+        elif tok_dir.exists():
             from .encoder import TorchSentenceEncoder
-            encoder = TorchSentenceEncoder(root / enc["tokenizer_dir"])
+            encoder = TorchSentenceEncoder(tok_dir)
         else:
             raise EncoderUnavailableError("Runtime requires an ONNX or local PyTorch encoder artifact.")
         with np.load(heads_path) as h:

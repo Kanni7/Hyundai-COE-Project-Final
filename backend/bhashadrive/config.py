@@ -218,7 +218,7 @@ class SherpaASRConfig:
     # A second model makes different mistakes (eval_asr, 432 graded commands: 311 -> 327 understood).
     # A listed model whose files are missing is skipped.
     extra_model_dirs: tuple = field(default_factory=lambda: tuple(
-        _abs(x.strip()) for x in _env("BD_SHERPA_EXTRA_MODEL_DIRS", "models/asr/hi-hinglish-swift").split(",") if x.strip()))
+        _abs(x.strip()) for x in _env("BD_SHERPA_EXTRA_MODEL_DIRS", "").split(",") if x.strip()))
     # One greedy decoding pass per language on the same loaded model; the NLU keeps the hypothesis
     # it understands best. "hi" keeps Hinglish words right, "en" spells English words better.
     languages: tuple = field(default_factory=lambda: tuple(

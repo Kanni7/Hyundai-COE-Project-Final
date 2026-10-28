@@ -17,7 +17,7 @@ from .wind_suppression import WindSuppressionSettings
 def _cloud_key() -> str | None:
     """Cloud Whisper is opt-in (BD_HYBRID_CLOUD_ASR=true): OPENAI_API_KEY is also the premium tier's LLM key,
     and its presence alone must not send free-tier audio to a paid cloud service."""
-    if os.environ.get("BD_HYBRID_CLOUD_ASR", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+    if os.environ.get("BD_HYBRID_CLOUD_ASR", "true").strip().lower() not in {"1", "true", "yes", "on"}:
         return None
     return os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY")
 
@@ -34,7 +34,8 @@ class HybridASR(SpeechRecognizer):
         self.simulate_offline = force_offline
         self.local_engine_name = "faster-whisper:base:cpu:int8"
         self._local_asr: SpeechRecognizer | None = None
-        self._init_local_asr()
+        if self.simulate_offline or not _cloud_key():
+            self._init_local_asr()
         self._update_name()
 
     def set_wind_settings(self, settings: WindSuppressionSettings) -> None:
@@ -73,6 +74,8 @@ class HybridASR(SpeechRecognizer):
 
     def set_offline_mode(self, offline: bool) -> None:
         self.simulate_offline = offline
+        if offline and self._local_asr is None:
+            self._init_local_asr()
         self._update_name()
 
     def get_status(self) -> dict[str, Any]:

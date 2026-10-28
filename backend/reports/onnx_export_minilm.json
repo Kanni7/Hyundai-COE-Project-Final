@@ -1,7 +1,7 @@
 {
   "encoder": "paraphrase-multilingual-MiniLM-L12-v2",
   "n_sentences": 3801,
-  "export_and_quantize_s": 7.4,
+  "export_and_quantize_s": 5.7,
   "size_mb": {
     "safetensors": 448.8,
     "onnx_fp32": 448.4,
