@@ -25,7 +25,7 @@ RUN pip install --no-cache-dir -e .
 
 # Pre-download local edge models during build so the container starts instantly
 RUN python scripts/download_models.py --asr swift --encoder minilm
-RUN python -m bhashadrive.training.export_onnx --encoder minilm
+RUN python -c "import gzip; from pathlib import Path; p = Path('models/onnx/minilm/model.int8.onnx'); gz = Path('models/onnx/minilm/model.int8.onnx.gz'); gz.is_file() and not p.is_file() and p.write_bytes(gzip.decompress(gz.read_bytes()))"
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('small', compute_type='int8')"
 
 # Default runtime configuration (optimized for Render Free Tier 512MB RAM)
