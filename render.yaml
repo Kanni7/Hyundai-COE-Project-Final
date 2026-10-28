@@ -34,3 +34,7 @@ services:
         value: "artifacts/nlu/runtime"
       - key: BD_PERSONAL_THRESHOLDS
         value: "artifacts/personalization.json"
+      - key: BD_HYBRID_CLOUD_ASR
+        value: "true"
+      - key: BD_SHERPA_EXTRA_MODEL_DIRS
+        value: ""

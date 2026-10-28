@@ -42,6 +42,8 @@ class Transcriber:
         return f"faster-whisper:{self.config.asr_model}"
 
     def load(self):
+        if self._factory is None and os.environ.get("SARVAM_API_KEY"):
+            return self.assistant_asr
         with self._lock:
             if self._asr is None:
                 cfg = ASRConfig()

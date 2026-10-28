@@ -24,7 +24,7 @@
   "encoder": {
     "name": "paraphrase-multilingual-MiniLM-L12-v2 (fine-tuned on BhashaDrive intents)",
     "backend": "onnx_fp32",
-    "onnx": "models/onnx/minilm-ft/model.fp32.onnx",
+    "onnx": "models/onnx/minilm-ft/model.int8.onnx",
     "tokenizer_dir": "models/finetuned/minilm-ft",
     "fine_tuned": true
   },
