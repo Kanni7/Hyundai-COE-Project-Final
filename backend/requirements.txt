@@ -2,7 +2,7 @@
 onnxruntime==1.31.0          # ASR (Whisper ONNX exports) and sentence-encoder inference (INT8)
 sherpa-onnx==1.13.8          # ASR and CAM++ speaker embeddings
 tokenizers                   # Rust tokenizer for the encoder (installed with transformers)
-numpy==2.5.4
+numpy>=2.0.0
 pydantic==2.14.1
 soundfile==0.14.0
 sounddevice==0.5.6

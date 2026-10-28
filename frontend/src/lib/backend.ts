@@ -6,7 +6,8 @@
 
 import type { Intent, ProfileId } from '../types';
 
-export const API = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
+const rawApi = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+export const API = rawApi ? rawApi.replace(/\/+$/, '') : '/api';
 const TIMEOUT_MS = 4000;
 const TRANSCRIBE_TIMEOUT_MS = 30000; // CPU speech recognition takes a few seconds per utterance
 const INTERPRET_TIMEOUT_MS = 8000; // the command LLM: ~0.3-1 s on a laptop CPU

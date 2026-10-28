@@ -2,3 +2,8 @@
 .DS_Store
 .vscode/
 .idea/
+
+# Secrets: API keys live in .env files, never in git (templates like .env.example stay tracked)
+.env
+.env.*
+!.env.example

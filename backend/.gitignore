@@ -11,12 +11,15 @@ models/
 *.gguf
 *.safetensors
 # V2: trained artifacts, embedding caches, user profiles and real recordings are never committed
-artifacts/
+artifacts/cache/
+artifacts/nlu/*
+!artifacts/nlu/runtime/
 data/profiles/
 samples/real/
 reports/_asr_items.json
 *.onnx
 *.npz
+!artifacts/nlu/runtime/*.npz
 *.sqlite
 
 # premium tier: usage logs and subscription tokens are never committed

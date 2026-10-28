@@ -90,6 +90,14 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
     if pipeline.asr is not None:
         pipeline.asr.set_wind_settings(wind_settings)
     app = FastAPI(title="BhashaDrive (local prototype)", docs_url="/docs")
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     api = APIRouter()
 
     @app.get("/console", response_class=HTMLResponse)

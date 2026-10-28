@@ -1,0 +1,6 @@
+{
+  "min_similarity": 0.92,
+  "min_similarity_contained": 0.76,
+  "min_margin": 0.3,
+  "calibrated": true
+}
