@@ -1,17 +1,20 @@
 // BharatConnect: two-way voice translation between driver and passenger.
 // One turn = recording -> /bharat/transcribe -> /bharat/translate -> /bharat/speak -> playback. Each stage is
 // its own request, so the UI shows the stage and a failed turn retries only from the stage that failed.
-// Translation and speech credentials stay on the backend.
+// Translation and speech credentials stay on the backend. The spoken language is detected from the audio; each
+// person only picks the language they hear.
 
 import { API } from './backend';
 
-export type Lang = 'ta' | 'hi' | 'en' | 'bn';
+/** Language code from /bharat/status: English and the 22 scheduled languages of India. */
+export type Lang = string;
 export type Speaker = 'driver' | 'passenger';
 export type Stage = 'transcribing' | 'translating' | 'generating_audio';
 /** Session states; `recording` and `playing_audio` lock both microphones. */
 export type SessionState = 'idle' | 'recording' | Stage | 'playing_audio' | 'error';
 
-export interface LanguageInfo { code: Lang; name: string; native: string }
+/** `speech`: the translation can be spoken aloud; otherwise it is shown as text only. */
+export interface LanguageInfo { code: Lang; name: string; native: string; speech: boolean }
 export interface BharatStatus {
   languages: LanguageInfo[];
   asr: { model: string; loaded: boolean };
@@ -23,8 +26,11 @@ export interface TurnError { stage: Stage | 'playing_audio' | 'input'; message: 
 export interface Turn {
   id: number;
   speaker: Speaker;
-  source: Lang;
+  /** Detected from the recording; unset until transcribed. */
+  source?: Lang;
   target: Lang;
+  /** The target language has no voice: the turn ends with the translated text. */
+  textOnly?: boolean;
   status: Stage | 'playing_audio' | 'done' | 'error';
   original?: string;
   translated?: string;
@@ -78,12 +84,11 @@ export const bharat = {
   warmup: () => fetch(`${API}/bharat/warmup`, { method: 'POST' }).catch(() => undefined),
 };
 
-async function transcribe(audio: Blob, lang: Lang): Promise<{ text: string; language?: string }> {
+async function transcribe(audio: Blob): Promise<{ text: string; language: Lang }> {
   const fd = new FormData();
   const ext = audio.type.includes('mp4') ? 'mp4' : audio.type.includes('ogg') ? 'ogg' : 'webm';
   fd.append('file', audio, `turn.${ext}`);
-  fd.append('language', lang);
-  const r: { text: string; status: string; language?: string } = await (await request('transcribing', '/transcribe', { method: 'POST', body: fd }, 60000)).json();
+  const r: { text: string; status: string; language: Lang } = await (await request('transcribing', '/transcribe', { method: 'POST', body: fd }, 60000)).json();
   if (!r.text.trim()) {
     throw new StageError({ stage: 'transcribing', message: 'No speech was heard. Hold the button closer and speak again.', retryable: false });
   }
@@ -115,22 +120,17 @@ export async function runTurn(turn: Turn, from: Stage, endedAt: number, update: 
   try {
     if (from === 'transcribing') {
       set({ status: 'transcribing' });
-      const asr = await timed('asr', () => transcribe(t.recording!, t.source));
-      t.original = asr.text;
-      set({ original: asr.text });
-      if (asr.language) {
-        const detected = asr.language.split('-')[0] as Lang;
-        if (['hi', 'ta', 'en', 'bn'].includes(detected) && detected !== t.target) {
-          t.source = detected;
-          set({ source: detected });
-        }
-      }
+      const asr = await timed('asr', () => transcribe(t.recording!));
+      set({ original: asr.text, source: asr.language });
     }
     if (from !== 'generating_audio') {
       set({ status: 'translating' });
-      const targetLang = t.source === t.target ? (t.target === 'en' ? 'hi' : 'en') : t.target;
-      t.target = targetLang;
-      set({ translated: await timed('translate', () => translate(t.original!, t.source, targetLang)), target: targetLang });
+      // Same language as the listener's: the server returns the text unchanged.
+      set({ translated: await timed('translate', () => translate(t.original!, t.source!, t.target)) });
+    }
+    if (t.textOnly) {
+      set({ status: 'done', timings: { total: Math.round(performance.now() - endedAt) } });
+      return true;
     }
     set({ status: 'generating_audio' });
     set({ speech: await timed('tts', () => speak(t.translated!, t.target)) });

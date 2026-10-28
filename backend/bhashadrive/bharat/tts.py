@@ -1,4 +1,5 @@
-"""Speech synthesis for BharatConnect: Sarvam Bulbul Text-to-Speech with Google Cloud fallback."""
+"""Speech synthesis for BharatConnect: Sarvam Bulbul Text-to-Speech with Google Cloud fallback. A language neither
+service can voice (`Language.speech` False) is refused: the turn keeps its translation as text."""
 from __future__ import annotations
 
 import base64
@@ -36,19 +37,22 @@ class GoogleTTS:
         return self._client
 
     def voice_for(self, lang: Language) -> str:
-        if lang.tts in self._voices:
-            return self._voices[lang.tts]
+        code = lang.google_tts
+        if code is None:
+            raise ServiceError("generating_audio", f"{SERVICE} has no voice for {lang.name}.", 422, False)
+        if code in self._voices:
+            return self._voices[code]
         try:
-            voices = self._get_client().list_voices(request={"language_code": lang.tts}, timeout=self.timeout_s).voices
+            voices = self._get_client().list_voices(request={"language_code": code}, timeout=self.timeout_s).voices
         except ServiceError:
             raise
         except Exception as exc:
             raise google_error("generating_audio", SERVICE, exc) from exc
-        names = sorted(v.name for v in voices if lang.tts in v.language_codes)
+        names = sorted(v.name for v in voices if code in v.language_codes)
         ranked = [n for tier in _TIERS for n in names if f"-{tier}-" in n] or names
         if not ranked:
-            raise ServiceError("generating_audio", f"{SERVICE} has no voice for {lang.name} ({lang.tts}).", 422, False)
-        self._voices[lang.tts] = ranked[0]
+            raise ServiceError("generating_audio", f"{SERVICE} has no voice for {lang.name} ({code}).", 422, False)
+        self._voices[code] = ranked[0]
         return ranked[0]
 
     def synthesize(self, text: str, lang_code: str) -> tuple[bytes, str, float]:
@@ -57,6 +61,8 @@ class GoogleTTS:
         text = " ".join(text.split())
         if not text:
             raise ServiceError("generating_audio", "Nothing to speak: the translation is empty.", 422, False)
+        if not lang.speech:
+            raise ServiceError("generating_audio", f"Spoken {lang.name} is not available yet; the translation is shown as text.", 422, False)
         t0 = time.perf_counter()
 
         # If a mock client was explicitly provided (unit tests):
@@ -65,7 +71,7 @@ class GoogleTTS:
 
         # Primary: Sarvam Bulbul TTS
         sarvam_key = os.environ.get("SARVAM_API_KEY")
-        if sarvam_key:
+        if sarvam_key and lang.bulbul:
             voice = f"sarvam:bulbul:v3:aditya"
             key = (voice, text)
             with self._lock:
@@ -76,7 +82,7 @@ class GoogleTTS:
             try:
                 payload = {
                     "inputs": [text],
-                    "target_language_code": lang.tts,
+                    "target_language_code": lang.sarvam,
                     "speaker": "aditya",
                     "model": "bulbul:v3"
                 }
@@ -108,7 +114,7 @@ class GoogleTTS:
                 return self._cache[key], voice, round(time.perf_counter() - t0, 3)
         try:
             resp = self._get_client().synthesize_speech(request={
-                "input": {"text": text}, "voice": {"language_code": lang.tts, "name": voice},
+                "input": {"text": text}, "voice": {"language_code": lang.google_tts, "name": voice},
                 "audio_config": {"audio_encoding": "MP3"}}, timeout=self.timeout_s)
         except Exception as exc:
             raise google_error("generating_audio", SERVICE, exc) from exc

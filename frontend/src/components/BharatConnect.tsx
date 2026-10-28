@@ -4,11 +4,11 @@ import { recordAudio } from '../lib/backend';
 import { bharat, play, runTurn, type BharatStatus, type Lang, type SessionState, type Speaker, type Stage, type Turn } from '../lib/bharat';
 
 const FALLBACK_LANGS = [
-  { code: 'ta', name: 'Tamil', native: 'தமிழ்' },
-  { code: 'hi', name: 'Hindi', native: 'हिन्दी' },
-  { code: 'en', name: 'English', native: 'English' },
-  { code: 'bn', name: 'Bengali', native: 'বাংলা' },
-] as const;
+  { code: 'ta', name: 'Tamil', native: 'தமிழ்', speech: true },
+  { code: 'hi', name: 'Hindi', native: 'हिन्दी', speech: true },
+  { code: 'en', name: 'English', native: 'English', speech: true },
+  { code: 'bn', name: 'Bengali', native: 'বাংলা', speech: true },
+];
 const STATE_LABEL: Record<SessionState, string> = {
   idle: 'Ready', recording: 'Listening…', transcribing: 'Transcribing…', translating: 'Translating…',
   generating_audio: 'Generating speech…', playing_audio: 'Playing translation', error: 'Needs attention',
@@ -21,7 +21,8 @@ const ROLE: Record<Speaker, string> = { driver: 'Driver', passenger: 'Passenger'
 const OTHER: Record<Speaker, Speaker> = { driver: 'passenger', passenger: 'driver' };
 const secs = (ms?: number) => (ms === undefined ? '–' : `${(ms / 1000).toFixed(1)} s`);
 
-/** Two-way driver <-> passenger voice translation (continuous conversational flow & push-to-talk). */
+/** Two-way driver <-> passenger voice translation (continuous conversational flow & push-to-talk). Each person
+ *  picks the language they hear; the language they speak is detected from the recording. */
 export function BharatConnect({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<BharatStatus | null>(null);
   const [offline, setOffline] = useState(false);
@@ -119,7 +120,9 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
 
     if (isClosed.current) return;
 
-    const t: Turn = { id: nextId.current++, speaker, source: langs[speaker], target: langs[OTHER[speaker]], status: 'transcribing', timings: {}, recording };
+    const target = langs[OTHER[speaker]];
+    const textOnly = (status?.languages ?? FALLBACK_LANGS).find((l) => l.code === target)?.speech === false;
+    const t: Turn = { id: nextId.current++, speaker, target, textOnly, status: 'transcribing', timings: {}, recording };
     setTurns((ts) => [...ts, t]);
     const success = await run(t, 'transcribing', endedAt);
 
@@ -205,10 +208,16 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
               <div key={sp} className={`bc-speaker ${sp} ${mine ? 'live' : ''}`}>
                 <div className="bc-speaker-head">
                   <b>{ROLE[sp]}</b>
-                  <select value={langs[sp]} disabled={locked} aria-label={`${ROLE[sp]} language`}
-                    onChange={(e) => setLangs({ ...langs, [sp]: e.target.value as Lang })}>
-                    {languages.map((l) => <option key={l.code} value={l.code}>{l.native === l.name ? l.name : `${l.name} · ${l.native}`}</option>)}
-                  </select>
+                  <label className="bc-hears">hears
+                    <select value={langs[sp]} disabled={locked} aria-label={`${ROLE[sp]} hears`}
+                      onChange={(e) => setLangs({ ...langs, [sp]: e.target.value })}>
+                      {languages.map((l) => (
+                        <option key={l.code} value={l.code}>
+                          {l.native === l.name ? l.name : `${l.name} · ${l.native}`}{l.speech ? '' : ' (text only)'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <button className="bc-ptt" onClick={() => void talk(sp)} disabled={locked && !mine}
                   aria-label={mine ? `Stop ${ROLE[sp]} recording` : `${ROLE[sp]}: speak`}>
@@ -216,9 +225,9 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
                   {mine && <><i /><i /></>}
                 </button>
                 <small className="bc-hint">
-                  {mine ? 'Listening… tap to stop' : locked ? 'Wait for the translation' : autoConversation ? `Auto-listen or tap ${ROLE[sp]}` : `Tap and speak ${langName(langs[sp])}`}
+                  {mine ? 'Listening… tap to stop' : locked ? 'Wait for the translation' : autoConversation ? `Auto-listen or tap ${ROLE[sp]}` : 'Tap and speak any language'}
                 </small>
-                <small className="bc-to">heard in {langName(langs[OTHER[sp]])}</small>
+                <small className="bc-to">language detected · {ROLE[OTHER[sp]]} hears {langName(langs[OTHER[sp]])}</small>
               </div>
             );
           })}
@@ -229,7 +238,7 @@ export function BharatConnect({ onClose }: { onClose: () => void }) {
           {turns.map((t) => (
             <li key={t.id} className={`bc-turn ${t.speaker} ${t.status}`}>
               <div className="bc-meta">
-                <b>{ROLE[t.speaker]}</b><span>{langName(t.source)} → {langName(t.target)}</span>
+                <b>{ROLE[t.speaker]}</b><span>{t.source ? langName(t.source) : 'Detecting…'} → {langName(t.target)}{t.textOnly && ' (text only)'}</span>
                 <em>{TURN_LABEL[t.status]}</em>
               </div>
               <p className="bc-orig">{t.original ?? (t.status === 'transcribing' ? '…' : '')}</p>

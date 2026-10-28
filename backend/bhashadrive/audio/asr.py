@@ -134,9 +134,9 @@ class FasterWhisperASR(SpeechRecognizer):
         )
 
 
-    def transcribe_verbatim(self, audio: np.ndarray, language: str, sample_rate: int = TARGET_SR) -> ASRResult:
-        """What was said, in `language` and its own script, for translation: no in-car prompt (it would pull
-        the decode towards car words) and no Hinglish-to-English normalisation."""
+    def transcribe_verbatim(self, audio: np.ndarray, language: str | None, sample_rate: int = TARGET_SR) -> ASRResult:
+        """What was said, in `language` (None: detected) and its own script, for translation: no in-car prompt (it
+        would pull the decode towards car words) and no Hinglish-to-English normalisation."""
         audio = np.asarray(audio, dtype=np.float32).reshape(-1) if audio is not None else np.zeros(0, np.float32)
         if audio.size == 0:
             return ASRResult(text="", status="no_audio", error="No audio samples received")
@@ -151,7 +151,7 @@ class FasterWhisperASR(SpeechRecognizer):
         except Exception as exc:
             return ASRResult(text="", status="error", error=f"Whisper inference failed: {exc}")
         text = " ".join(s.text.strip() for s in self._kept(segs, None)).strip()
-        return ASRResult(text=text, raw_text=text, language=language, duration_s=duration,
+        return ASRResult(text=text, raw_text=text, language=language or getattr(info, "language", None), duration_s=duration,
                          status="ok" if text else "silence", latency_s=round(time.perf_counter() - t0, 3))
 
     _HALLUCINATIONS = {"thank you", "thank you.", "thanks for watching", "thanks for watching.",

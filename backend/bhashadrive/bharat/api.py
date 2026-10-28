@@ -54,7 +54,7 @@ def bharat_router(s: BharatServices) -> APIRouter:
 
     @r.get("/status")
     def status():
-        return {"languages": [{"code": l.code, "name": l.name, "native": l.native} for l in LANGUAGES.values()],
+        return {"languages": [{"code": l.code, "name": l.name, "native": l.native, "speech": l.speech} for l in LANGUAGES.values()],
                 "asr": {"model": s.transcriber.model, "loaded": s.transcriber.loaded},
                 "translation": {"problem": s.translator.problem()}}
 
@@ -68,7 +68,8 @@ def bharat_router(s: BharatServices) -> APIRouter:
         return {"loaded": True, "model": s.transcriber.model}
 
     @r.post("/transcribe")
-    async def transcribe(file: UploadFile = File(...), language_code: str = Form(..., alias="language")):
+    async def transcribe(file: UploadFile = File(...), language_code: str | None = Form(None, alias="language")):
+        """Without `language`, the spoken language is detected and returned as `language`."""
         data = await file.read()
         if not data:
             _fail(ServiceError("transcribing", "The recording is empty.", 400, False))
@@ -81,7 +82,7 @@ def bharat_router(s: BharatServices) -> APIRouter:
                 out = s.transcriber.transcribe_file(p, language_code)
             except (ServiceError, ValueError) as e:
                 _fail(e)
-        print(f"[API /bharat/transcribe] {language_code} {out['duration_s']}s audio -> '{out.get('text')}' (detected: {out.get('language')}) in {out['latency_s']}s")
+        print(f"[API /bharat/transcribe] {language_code or 'auto'} {out['duration_s']}s audio -> '{out.get('text')}' (detected: {out.get('language')}) in {out['latency_s']}s")
 
         return out
 

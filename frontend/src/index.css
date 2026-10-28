@@ -1085,6 +1085,7 @@ img.layer { object-fit: fill; }
 .bc-speaker.live .bc-ptt i + i { animation-delay: 0.7s; }
 .bc-hint { font-size: 13px; color: #c9d6ee; }
 .bc-to { font-size: 11.5px; color: var(--muted); }
+.bc-hears { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
 
 .bc-history { list-style: none; margin: 0; padding: 4px 16px 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 120px; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.15) transparent; }
 .bc-empty { padding: 18px; text-align: center; font-size: 13px; color: var(--muted); }

@@ -9,7 +9,7 @@ from google.api_core import exceptions as gx
 from bhashadrive.api.server import create_app
 from bhashadrive.bharat.api import BharatServices
 from bhashadrive.bharat.errors import ServiceError
-from bhashadrive.bharat.languages import LANGUAGES, language
+from bhashadrive.bharat.languages import LANGUAGES, detected, language
 from bhashadrive.bharat.speech import Transcriber
 from bhashadrive.bharat.translation import GoogleTranslator
 from bhashadrive.bharat.tts import GoogleTTS
@@ -46,14 +46,24 @@ class FakeWhisper:
         self.cfg = cfg
 
     def transcribe_verbatim(self, audio, lang):
+        if lang is None:  # detect: this speaker talks Tamil
+            return ASRResult(text="vanakkam", language="ta", status="ok", duration_s=1.7, latency_s=0.1)
         return ASRResult(text="" if lang == "en" else f"spoken in {lang}", status="silence" if lang == "en" else "ok",
                          duration_s=1.7, latency_s=0.1)
 
 
 def test_language_table():
-    assert {"ta", "hi", "en"} <= set(LANGUAGES) and language("ta").tts == "ta-IN"
+    assert len(LANGUAGES) == 23 and all(l.sarvam for l in LANGUAGES.values())  # English + 22 scheduled
+    assert language("ta").google_tts == "ta-IN" and language("or").sarvam == "od-IN" and language("kok").google == "gom"
+    assert {l.code for l in LANGUAGES.values() if l.google is None} == {"brx", "ks", "sat"}
+    assert language("or").speech and not language("sat").speech
     with pytest.raises(ValueError):
         language("fr")
+
+
+def test_detected_language_codes():
+    assert detected("od-IN").code == "or" and detected("en-IN").code == "en" and detected("hi").code == "hi"
+    assert detected("brx-IN").code == "brx" and detected(None) is None and detected("fr-FR") is None
 
 
 def test_translation_calls_v3_once_per_phrase_and_maps_errors():
@@ -91,11 +101,21 @@ def test_tts_refuses_language_without_voice():
     assert e.value.status == 422 and not e.value.retryable
 
 
+def test_tts_refuses_language_with_no_voice_service():
+    with pytest.raises(ServiceError) as e:
+        GoogleTTS(client=FakeTTS()).synthesize("johar", "sat")
+    assert e.value.status == 422 and not e.value.retryable and "text" in e.value.message
+
+
 def test_turn_pipeline_routes():
     services = BharatServices(Transcriber(BharatConfig(), factory=FakeWhisper),
                               GoogleTranslator("p", client=FakeTranslate()), GoogleTTS(client=FakeTTS()))
     c = TestClient(create_app(AppConfig(), make_pipeline(), bharat=services))
-    assert [l["code"] for l in c.get("/api/bharat/status").json()["languages"]] == ["ta", "hi", "en", "bn"]
+    langs = c.get("/api/bharat/status").json()["languages"]
+    assert len(langs) == 23 and {"code": "sat", "name": "Santali", "native": "ᱥᱟᱱᱛᱟᱲᱤ", "speech": False} in langs
+    # No language sent: the spoken one is detected and reported.
+    auto = c.post("/api/bharat/transcribe", files={"file": ("a.wav", WAV.read_bytes(), "audio/wav")}).json()
+    assert auto["text"] == "vanakkam" and auto["language"] == "ta"
     heard = c.post("/api/bharat/transcribe", files={"file": ("a.wav", WAV.read_bytes(), "audio/wav")}, data={"language": "ta"}).json()
     assert heard["text"] == "spoken in ta" and heard["status"] == "ok"
     said = c.post("/api/bharat/translate", json={"text": heard["text"], "source": "ta", "target": "hi"}).json()
