@@ -1,7 +1,7 @@
 {
   "encoder": "paraphrase-multilingual-MiniLM-L12-v2 (fine-tuned on BhashaDrive intents)",
-  "n_sentences": 9057,
-  "export_and_quantize_s": 5.1,
+  "n_sentences": 3801,
+  "export_and_quantize_s": 6.2,
   "size_mb": {
     "safetensors": 448.8,
     "onnx_fp32": 448.4,
@@ -13,8 +13,8 @@
     "p01": 1.0
   },
   "cosine_vs_torch_onnx_int8": {
-    "mean": 0.98396,
-    "min": 0.73896,
-    "p01": 0.94111
+    "mean": 0.97951,
+    "min": 0.73365,
+    "p01": 0.92281
   }
 }

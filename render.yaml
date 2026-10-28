@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: hyundai-bhashadrive-backend
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: BD_DEV_TIER_SWITCH
+        value: "true"
+      - key: BD_DEV_DEFAULT_TIER
+        value: "premium"
+      - key: BD_SARVAM_STT_MODE
+        value: "codemix"
+      - key: BD_LOCAL_ASR
+        value: "swift"
+      - key: BD_ASR_MODEL
+        value: "small"
+      - key: BD_ASR_DEVICE
+        value: "cpu"
+      - key: BD_ASR_COMPUTE_TYPE
+        value: "int8"
+      - key: BD_ASR_LOCAL_ONLY
+        value: "true"
+      - key: BD_NLU_ARTIFACTS
+        value: "artifacts/nlu/runtime"
+      - key: BD_PERSONAL_THRESHOLDS
+        value: "artifacts/personalization.json"

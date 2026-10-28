@@ -1,0 +1,185 @@
+{
+ "model_version": "bhashadrive-nlu-minilm-ft_onnx_fp32-202610281532",
+ "teach_val": [
+  {
+   "teach": "When I say 'make it cozy', set the temperature to 22 degrees.",
+   "trigger_expected": "make it cozy",
+   "proposal": "Should I save this: when you say 'make it cozy', I will set the cabin temperature to 22°C?",
+   "intent_ok": true,
+   "params_ok": true,
+   "saved": true
+  },
+  {
+   "teach": "Jab main 'chill mode' bolun, AC 22 pe set kar dena.",
+   "trigger_expected": "chill mode",
+   "proposal": "'chill mode' already sounds like a built-in command (make the cabin cooler). Please pick another phrase.",
+   "intent_ok": false,
+   "params_ok": false,
+   "saved": false
+  },
+  {
+   "teach": "When I say 'party time', turn the volume up.",
+   "trigger_expected": "party time",
+   "proposal": "Should I save this: when you say 'party time', I will turn the volume up?",
+   "intent_ok": true,
+   "params_ok": true,
+   "saved": true
+  },
+  {
+   "teach": "Jab main 'shanti' bolun, gaana pause kar do.",
+   "trigger_expected": "shanti",
+   "proposal": "Should I save this: when you say 'shanti', I will pause media?",
+   "intent_ok": true,
+   "params_ok": true,
+   "saved": true
+  },
+  {
+   "teach": "When I say 'office route', navigate to Cyber Hub.",
+   "trigger_expected": "office route",
+   "proposal": "'office route' already sounds like a built-in command (search navigation for a destination). Please pick another phrase.",
+   "intent_ok": false,
+   "params_ok": false,
+   "saved": false
+  }
+ ],
+ "thresholds": {
+  "min_similarity": 0.92,
+  "min_similarity_contained": 0.76,
+  "min_margin": 0.3,
+  "calibrated": true
+ },
+ "val": {
+  "uses": {
+   "n": 8,
+   "correct_match_rate": 0.625,
+   "misses": [
+    "chill mode",
+    "Chill mode",
+    "office route"
+   ]
+  },
+  "paraphrases": {
+   "n": 13,
+   "correct_match_rate": 0.6154,
+   "misses": [
+    "Chill mode, yaar.",
+    "chill mode on karo",
+    "chill mode please",
+    "office route please",
+    "take the office route"
+   ]
+  },
+  "negatives": {
+   "n": 17,
+   "false_acceptance_rate": 0.0,
+   "false_acceptances": []
+  },
+  "unrelated": {
+   "n": 11,
+   "false_acceptance_rate": 0.0,
+   "false_acceptances": []
+  },
+  "negated_or_quoted_blocked": "7/7"
+ },
+ "teach_test": [
+  {
+   "teach": "When I say 'freeze mode', set the temperature to 18 degrees.",
+   "trigger_expected": "freeze mode",
+   "proposal": "'freeze mode' already sounds like a built-in command (pause media). Please pick another phrase.",
+   "intent_ok": false,
+   "params_ok": false,
+   "saved": false
+  },
+  {
+   "teach": "Jab main 'dhamaka' bolun, volume badha dena.",
+   "trigger_expected": "dhamaka",
+   "proposal": "Should I save this: when you say 'dhamaka', I will turn the volume up?",
+   "intent_ok": true,
+   "params_ok": true,
+   "saved": true
+  },
+  {
+   "teach": "When I say 'quiet please', pause the music.",
+   "trigger_expected": "quiet please",
+   "proposal": "Should I save this: when you say 'quiet please', I will pause media?",
+   "intent_ok": true,
+   "params_ok": true,
+   "saved": true
+  },
+  {
+   "teach": "When I say 'ghar chalo', navigate to Lajpat Nagar.",
+   "trigger_expected": "ghar chalo",
+   "proposal": "Should I save this: when you say 'ghar chalo', I will search navigation for 'Lajpat Nagar'?",
+   "intent_ok": true,
+   "params_ok": true,
+   "saved": true
+  },
+  {
+   "teach": "When I say 'warm hug', make it warmer.",
+   "trigger_expected": "warm hug",
+   "proposal": "Should I save this: when you say 'warm hug', I will make the cabin warmer?",
+   "intent_ok": true,
+   "params_ok": true,
+   "saved": true
+  },
+  {
+   "teach": "Jab main 'agla dhun' bolun, next song chala do.",
+   "trigger_expected": "agla dhun",
+   "proposal": "Should I save this: when you say 'agla dhun', I will skip to the next track?",
+   "intent_ok": true,
+   "params_ok": true,
+   "saved": true
+  }
+ ],
+ "test": {
+  "uses": {
+   "n": 10,
+   "correct_match_rate": 0.6,
+   "misses": [
+    "freeze mode",
+    "Freeze mode.",
+    "Dhamaka!",
+    "Ghar chalo."
+   ]
+  },
+  "paraphrases": {
+   "n": 15,
+   "correct_match_rate": 0.6,
+   "misses": [
+    "freeze mode please",
+    "freeze mode on karo",
+    "activate freeze mode",
+    "full dhamaka",
+    "chalo ghar",
+    "ghar le chalo"
+   ]
+  },
+  "negatives": {
+   "n": 18,
+   "false_acceptance_rate": 0.0556,
+   "false_acceptances": [
+    "no warm hug"
+   ]
+  },
+  "unrelated": {
+   "n": 12,
+   "false_acceptance_rate": 0.1667,
+   "false_acceptances": [
+    "quiet",
+    "hug"
+   ]
+  },
+  "negated_or_quoted_blocked": "9/9"
+ },
+ "match_latency_ms": {
+  "median": 5.73,
+  "p95": 7.01
+ },
+ "corrections_test": {
+  "n": 6,
+  "action_retrieval_after_correction": "5/6",
+  "alias_added": "3/6",
+  "not_executed_after_delete": "6/6"
+ },
+ "note": "Synthetic phrases; thresholds chosen on validation profiles with the objective of zero false acceptances, then frozen for the test profiles. Small sample: treat as a smoke-level estimate."
+}

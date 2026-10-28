@@ -5,7 +5,7 @@ uvicorn==0.54.0
 python-multipart
 httpx==0.28.1
 pydantic==2.14.1
-numpy==2.5.4
+numpy>=2.0.0
 soundfile==0.14.0
 av                           # decodes browser recordings (webm/ogg/mp4) for server speech recognition
 onnxruntime==1.31.0          # server speech recognition: hi-hinglish Whisper ONNX export (primary)

@@ -1,0 +1,50 @@
+{
+  "model_version": "bhashadrive-nlu-minilm-ft_onnx_fp32-202610281532",
+  "taxonomy_version": "2.0.0",
+  "classes": [
+    "climate_temperature_up",
+    "climate_temperature_down",
+    "climate_temperature_set",
+    "climate_fan_speed_up",
+    "climate_fan_speed_down",
+    "climate_on",
+    "climate_off",
+    "volume_up",
+    "volume_down",
+    "media_play",
+    "media_pause",
+    "media_next",
+    "media_previous",
+    "navigation_destination_request",
+    "dialog_confirm",
+    "dialog_cancel",
+    "unsupported",
+    "ambiguous"
+  ],
+  "encoder": {
+    "name": "paraphrase-multilingual-MiniLM-L12-v2 (fine-tuned on BhashaDrive intents)",
+    "backend": "onnx_fp32",
+    "onnx": "models/onnx/minilm-ft/model.fp32.onnx",
+    "tokenizer_dir": "models/finetuned/minilm-ft",
+    "fine_tuned": true
+  },
+  "intent_head": {
+    "type": "logistic_regression",
+    "C": 0.5,
+    "temperature": 0.7971
+  },
+  "confidence_meaning": "temperature-scaled softmax probability of the top intent from a logistic-regression head; temperature fitted on the validation split. It is an estimate, not a guarantee, and is only calibrated for text resembling the training distribution.",
+  "thresholds": {
+    "min_score": 0.75,
+    "min_margin": 0.15,
+    "val_wrong_execution_rate": 0.0131,
+    "val_coverage_of_correct_exec": 0.4415,
+    "val_accepted": 153,
+    "target_risk": 0.02,
+    "met_target": true
+  },
+  "negation_threshold": 0.5,
+  "implicit_threshold": 0.5,
+  "train_size": 3027,
+  "val_size": 543
+}
