@@ -58,12 +58,14 @@ class Entitlements:
                     tier = rec.get("tier") if rec.get("tier") in TIERS and not expired else "free"
                     return Entitlement(tier, subject, "token", expired)
             return Entitlement("free", "anonymous", "default")  # unknown token: no premium
-        if self.config.dev_tier_switch and client_host in LOOPBACK:
+        if self.config.dev_tier_switch:
             return Entitlement(self._dev_tier, "dev-local", "dev")
         return Entitlement("free", "anonymous", "default")
 
     def set_dev_tier(self, tier: str, client_host: str | None) -> None:
-        if not self.config.dev_tier_switch or client_host not in LOOPBACK:
+        # Tier switch is permitted whenever BD_DEV_TIER_SWITCH is enabled on the server,
+        # allowing testing on local dev as well as cloud previews (e.g. Render).
+        if not self.config.dev_tier_switch:
             raise PermissionError("tier switch is disabled")
         if tier not in TIERS:
             raise ValueError(f"unknown tier {tier}")
