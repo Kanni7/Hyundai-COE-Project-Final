@@ -49,10 +49,24 @@ class IntentModel:
         enc = manifest["encoder"]
         onnx_path = root / enc.get("onnx", "")
         # Prefer INT8 ONNX if available for fast inference and <512MB RAM on free-tier containers
-        if onnx_path.with_name("model.int8.onnx").is_file():
-            onnx_path = onnx_path.with_name("model.int8.onnx")
-        elif (root / "models" / "onnx" / "minilm" / "model.int8.onnx").is_file():
-            onnx_path = root / "models" / "onnx" / "minilm" / "model.int8.onnx"
+        candidates = [
+            onnx_path.with_name("model.int8.onnx"),
+            root / "models" / "onnx" / "minilm" / "model.int8.onnx",
+            onnx_path,
+        ]
+        resolved = onnx_path
+        for c in candidates:
+            if c.is_file():
+                resolved = c
+                break
+            gz = c.parent / (c.name + ".gz")
+            if gz.is_file():
+                import gzip
+                print(f"[NLU] Decompressing {gz.name} to {c.name}...")
+                c.write_bytes(gzip.decompress(gz.read_bytes()))
+                resolved = c
+                break
+        onnx_path = resolved
 
         tok_dir = root / enc.get("tokenizer_dir", "")
         if not (tok_dir / "tokenizer.json").is_file():

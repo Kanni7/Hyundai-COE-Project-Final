@@ -6,7 +6,12 @@ __pycache__/
 .env
 recordings/
 # model weights live in the Hugging Face / Ollama caches, never in the repo
-models/
+models/*
+!models/onnx/
+models/onnx/*
+!models/onnx/minilm/
+models/onnx/minilm/*
+!models/onnx/minilm/model.int8.onnx.gz
 *.bin
 *.gguf
 *.safetensors
