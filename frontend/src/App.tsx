@@ -705,7 +705,8 @@ export default function App() {
 
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark">Smart Cockpit</span>
+          <span className="brand-mark">Myra</span>
+          <span className="brand-sub">Smart Cockpit</span>
         </div>
         <div className="top-actions">
 
