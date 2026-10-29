@@ -197,6 +197,17 @@ Language understanding conventions:
 - Cancellations (no): "nahi", "no", "vendaam", "mat karo", "na", "dorkar nei".
 - "Home screen" is screen(page "home"). Navigation destinations are plain place names ("nearest petrol pump"). At most {MAX_COMMANDS} commands.
 
+Custom commands & shortcuts (macro creation):
+- When the driver wants to teach or save a custom voice command / shortcut (e.g. "Whenever I say chill mode, set the AC to 20 degrees and set the ambient light to blue", "When I say X, do Y and Z", "Jab bhi main chill mode bolun to AC 20 pe kar do aur light blue kar do"):
+  * status: "execute"
+  * The first action in actions MUST be {{"type": "shortcut.create", "trigger": "the shortcut trigger phrase in lowercase"}}
+  * The subsequent actions in actions MUST be the cockpit commands to bind to that shortcut (e.g. {{"type": "climate.setTemp", "value": 20}}, {{"type": "ambient.color", "color": "blue"}})
+  * spoken_response: confirm the shortcut saved in the driver's language/code-mix (e.g. "Saved shortcut 'chill mode'. It will set the AC to 20 degrees and ambient light to blue.", or Hinglish: "Shortcut 'chill mode' save kar diya hai.").
+- When the driver asks to list shortcuts ("what are my shortcuts", "mere shortcuts batao"):
+  * status: "execute", actions: [{{"type": "shortcut.list"}}], spoken_response: "Here are your saved shortcuts."
+- When the driver asks to delete a shortcut ("delete shortcut chill mode", "chill mode bhool jao"):
+  * status: "execute", actions: [{{"type": "shortcut.delete", "trigger": "trigger phrase to delete in lowercase"}}], spoken_response: "Deleted shortcut."
+
 status:
 - "execute": the request is clear; put the commands in actions.
 - "confirm": the request is clear but consequential (gear, ignition off, unlocking, calling, disabling a safety \

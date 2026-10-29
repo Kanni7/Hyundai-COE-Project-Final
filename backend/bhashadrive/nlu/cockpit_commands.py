@@ -67,6 +67,9 @@ COMMANDS: dict[str, list[tuple[str, dict, bool]]] = {
     "greet": [],
     "help": [],
     "thanks": [],
+    "shortcut.create": [("trigger", {"type": "string", "minLength": 1, "maxLength": 60}, True)],
+    "shortcut.delete": [("trigger", {"type": "string", "minLength": 1, "maxLength": 60}, True)],
+    "shortcut.list": [],
 }
 MAX_COMMANDS = 4
 

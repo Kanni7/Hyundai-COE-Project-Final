@@ -25,7 +25,7 @@ interface Props {
 }
 
 const GENRE_ICON = { lofi: Disc3, romantic: Heart, party: PartyPopper, devotional: Flower2, retro: Radio };
-const TOAST_ICON = { climate: Thermometer, fan: Fan, music: Music, volume: Volume2, light: Lightbulb, seat: Armchair, wiper: CloudRain, window: Wind, drive: Car, nav: Navigation, phone: Phone, power: Power, lock: Lock };
+const TOAST_ICON = { climate: Thermometer, fan: Fan, music: Music, volume: Volume2, light: Lightbulb, seat: Armchair, wiper: CloudRain, window: Wind, drive: Car, nav: Navigation, phone: Phone, power: Power, lock: Lock, sparkles: Sparkles };
 
 function useClock() {
   const [now, setNow] = useState(() => new Date());

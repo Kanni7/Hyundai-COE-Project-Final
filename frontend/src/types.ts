@@ -67,7 +67,10 @@ export type Intent =
   | { type: 'query'; topic: 'temp' | 'fuel' | 'music' | 'time' | 'speed' | 'tyres' }
   | { type: 'greet' }
   | { type: 'help' }
-  | { type: 'thanks' };
+  | { type: 'thanks' }
+  | { type: 'shortcut.create'; trigger: string }
+  | { type: 'shortcut.delete'; trigger: string }
+  | { type: 'shortcut.list' };
 
 export interface CarState {
   scene: SceneId;
@@ -104,7 +107,7 @@ export interface CarState {
 
 export interface Toast {
   id: number;
-  icon: 'climate' | 'fan' | 'music' | 'volume' | 'light' | 'seat' | 'wiper' | 'window' | 'drive' | 'nav' | 'phone' | 'power' | 'lock';
+  icon: 'climate' | 'fan' | 'music' | 'volume' | 'light' | 'seat' | 'wiper' | 'window' | 'drive' | 'nav' | 'phone' | 'power' | 'lock' | 'sparkles';
   label: string;
   value: string;
 }
