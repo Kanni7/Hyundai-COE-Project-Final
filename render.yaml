@@ -38,3 +38,5 @@ services:
         value: "true"
       - key: BD_SHERPA_EXTRA_MODEL_DIRS
         value: ""
+      - key: BD_CLOUD_ONLY
+        value: "true"
