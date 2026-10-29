@@ -322,18 +322,6 @@ export default function App() {
       }
     }
     nlu.current = parsed.context;
-    const matched = matchShortcut(carRef.current.profile, text);
-    if (matched && matched.actions.length > 0) {
-      const say = parsed.lang === 'hi'
-        ? `${matched.trigger} activate kar diya.`
-        : `${matched.trigger} activated.`;
-      window.setTimeout(() => finish({
-        intents: matched.actions,
-        say,
-        engine: 'local',
-      }), via === 'voice' ? 0 : Math.max(0, THINK_MS - (Date.now() - started)));
-      return;
-    }
     const online = serverRef.current !== null;
 
     const finish = ({ intents, say, engine: via, awaitingConfirm: awaiting }: Routed) => {
@@ -394,9 +382,22 @@ export default function App() {
       }
     };
 
+    const matched = matchShortcut(carRef.current.profile, text);
+    if (matched && matched.actions.length > 0) {
+      const say = parsed.lang === 'hi'
+        ? `${matched.trigger} activate kar diya.`
+        : `${matched.trigger} activated.`;
+      finish({
+        intents: matched.actions,
+        say,
+        engine: 'local',
+      });
+      return;
+    }
+
     (premiumRef.current && serverRef.current
       ? routePremium(text, parsed, serverRef.current, carRef.current)
-      : route(text, parsed, serverRef.current))
+      : route(text, parsed, serverRef.current, carRef.current))
       .catch((): Routed => {
         setServer(null); // backend went away: carry on with the local parser
         return { intents: parsed.intents, engine: 'local' };

@@ -17,12 +17,33 @@ export function normalizeTrigger(text: string): string {
     .trim();
 }
 
+export function isTeachOrManageUtterance(text: string): boolean {
+  const norm = normalizeTrigger(text);
+  if (/^(whenever|when|if)\s+i\s+say\b/i.test(norm)) return true;
+  if (/^jab\s+(bhi\s+)?(main|mai|me|mein|hum)\b/i.test(norm)) return true;
+  if (/^(teach|create|set|delete|remove|forget|list|show)\s+(my\s+)?(shortcut|shortcuts|command|commands)\b/i.test(norm)) return true;
+  return false;
+}
+
 export function getShortcuts(profileId: ProfileId = 'default'): CustomShortcut[] {
   try {
-    const raw = localStorage.getItem(`${STORAGE_PREFIX}${profileId}`);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const list: CustomShortcut[] = [];
+    const keys = [`${STORAGE_PREFIX}${profileId || 'default'}`];
+    if (profileId && profileId !== 'default') keys.push(`${STORAGE_PREFIX}default`);
+    for (const key of keys) {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (!list.some((existing) => existing.triggerNorm === item.triggerNorm)) {
+              list.push(item);
+            }
+          }
+        }
+      }
+    }
+    return list;
   } catch {
     return [];
   }
@@ -30,7 +51,13 @@ export function getShortcuts(profileId: ProfileId = 'default'): CustomShortcut[]
 
 export function saveShortcut(profileId: ProfileId = 'default', trigger: string, actions: Intent[]): CustomShortcut {
   const norm = normalizeTrigger(trigger);
-  const existing = getShortcuts(profileId).filter((s) => s.triggerNorm !== norm);
+  const currentKey = `${STORAGE_PREFIX}${profileId || 'default'}`;
+  let existing: CustomShortcut[] = [];
+  try {
+    const raw = localStorage.getItem(currentKey);
+    existing = raw ? JSON.parse(raw) : [];
+  } catch {}
+  existing = existing.filter((s) => s.triggerNorm !== norm);
   const shortcut: CustomShortcut = {
     trigger: trigger.trim(),
     triggerNorm: norm,
@@ -39,7 +66,10 @@ export function saveShortcut(profileId: ProfileId = 'default', trigger: string, 
   };
   existing.unshift(shortcut);
   try {
-    localStorage.setItem(`${STORAGE_PREFIX}${profileId}`, JSON.stringify(existing));
+    localStorage.setItem(currentKey, JSON.stringify(existing));
+    if (profileId && profileId !== 'default') {
+      localStorage.setItem(`${STORAGE_PREFIX}default`, JSON.stringify(existing));
+    }
   } catch (e) {
     console.warn('Failed to save shortcut to localStorage:', e);
   }
@@ -53,7 +83,8 @@ export function deleteShortcut(profileId: ProfileId = 'default', trigger: string
   const changed = filtered.length !== existing.length;
   if (changed) {
     try {
-      localStorage.setItem(`${STORAGE_PREFIX}${profileId}`, JSON.stringify(filtered));
+      localStorage.setItem(`${STORAGE_PREFIX}${profileId || 'default'}`, JSON.stringify(filtered));
+      localStorage.setItem(`${STORAGE_PREFIX}default`, JSON.stringify(filtered));
     } catch (e) {
       console.warn('Failed to update shortcuts in localStorage:', e);
     }
@@ -62,6 +93,7 @@ export function deleteShortcut(profileId: ProfileId = 'default', trigger: string
 }
 
 export function matchShortcut(profileId: ProfileId = 'default', text: string): CustomShortcut | null {
+  if (isTeachOrManageUtterance(text)) return null;
   const norm = normalizeTrigger(text);
   if (!norm) return null;
   const shortcuts = getShortcuts(profileId);
