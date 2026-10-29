@@ -23,20 +23,12 @@ COPY . .
 # Install package in editable mode
 RUN pip install --no-cache-dir -e .
 
-# Pre-download local edge models during build so the container starts instantly
-RUN python scripts/download_models.py --asr swift --encoder minilm
-RUN python -c "import gzip; from pathlib import Path; p = Path('models/onnx/minilm/model.int8.onnx'); gz = Path('models/onnx/minilm/model.int8.onnx.gz'); gz.is_file() and not p.is_file() and p.write_bytes(gzip.decompress(gz.read_bytes()))"
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('small', compute_type='int8')"
-
-# Default runtime configuration (optimized for Render Free Tier 512MB RAM)
+# Cloud Mode Configuration for Render Free Tier (RAM: ~68 MB, strictly <512 MB)
+# All speech recognition, LLM reasoning, translation and TTS are offloaded to
+# high-speed Free Tier Cloud APIs (Groq Whisper, Groq Qwen 3.8, Sarvam Saaras & Bulbul).
 ENV BD_API_HOST=0.0.0.0
-ENV BD_LOCAL_ASR=swift
-ENV BD_ASR_MODEL=small
-ENV BD_ASR_DEVICE=cpu
-ENV BD_ASR_COMPUTE_TYPE=int8
-ENV BD_ASR_LOCAL_ONLY=true
+ENV BD_CLOUD_ONLY=true
 ENV BD_HYBRID_CLOUD_ASR=true
-ENV BD_SHERPA_EXTRA_MODEL_DIRS=""
 ENV BD_DEV_DEFAULT_TIER=premium
 ENV BD_DEV_TIER_SWITCH=true
 ENV BD_NLU_ARTIFACTS=artifacts/nlu/runtime

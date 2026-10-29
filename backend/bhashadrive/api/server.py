@@ -4,6 +4,7 @@ Every API route is served both at the root (test console, scripts) and under /ap
 """
 from __future__ import annotations
 
+import os
 import tempfile
 import threading
 from pathlib import Path
@@ -44,18 +45,49 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
                frontend_dir: Path | None = FRONTEND_DIST, command_llm=None, bharat=None, speaker=None,
                assistant=None, entitlements=None) -> FastAPI:
     config = config or AppConfig()
+    cloud_mode = (
+        mock
+        or os.environ.get("RENDER") == "true"
+        or os.environ.get("BD_CLOUD_ONLY", "").strip().lower() in {"1", "true", "yes", "on"}
+    )
     speaker = speaker or SpeakerID(config.speaker)  # model loads on first use
     bharat = bharat or BharatServices.from_config(config.bharat)  # services load lazily: free until used
-    if command_llm is None and pipeline is None and not (mock or legacy):
-        try:
-            from ..nlu.command_llm import CommandLLM
+    if command_llm is None:
+        if (cloud_mode or not (mock or legacy)) and (os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY")):
+            try:
+                from ..assistant.providers import OpenAIInterpreter
 
-            command_llm = CommandLLM(config.command_llm)
-            print(f"[OK] Command LLM loaded: {command_llm.name}")
-        except Exception as e:  # optional fallback interpreter: the cockpit runs without it
-            print(f"[NOTE] Command LLM unavailable: {e}")
+                class CloudCommandLLM:
+                    def __init__(self, assistant_cfg):
+                        self.interp = OpenAIInterpreter(assistant_cfg)
+                        self.name = "cloud:groq-qwen3.8-27b"
+
+                    def interpret(self, text: str) -> tuple[list[dict], float]:
+                        res = self.interp.interpret(text, [], {})
+                        return res.actions, res.latency_s
+
+                command_llm = CloudCommandLLM(config.assistant)
+                print(f"[OK] Cloud Command LLM active: {command_llm.name}")
+            except Exception as e:
+                print(f"[NOTE] Cloud Command LLM unavailable: {e}")
+
+        if command_llm is None and not (mock or legacy or cloud_mode):
+            try:
+                from ..nlu.command_llm import CommandLLM
+
+                command_llm = CommandLLM(config.command_llm)
+                print(f"[OK] Command LLM loaded: {command_llm.name}")
+            except Exception as e:  # optional fallback interpreter: the cockpit runs without it
+                print(f"[NOTE] Command LLM unavailable: {e}")
     if pipeline is None:
-        if mock:
+        if cloud_mode:
+            from ..audio.hybrid_asr import HybridASR
+            from ..tests.fakes_v2 import make_pipeline
+
+            pipeline = make_pipeline()
+            pipeline.asr = HybridASR(config)
+            print("[OK] Cloud-optimized API pipeline initialized (<70MB RAM).")
+        elif mock:
             from ..audio.asr import MockASR
             from ..tests.fakes_v2 import make_pipeline
 
