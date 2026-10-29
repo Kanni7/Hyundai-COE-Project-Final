@@ -53,7 +53,7 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
     speaker = speaker or SpeakerID(config.speaker)  # model loads on first use
     bharat = bharat or BharatServices.from_config(config.bharat)  # services load lazily: free until used
     if command_llm is None:
-        if (cloud_mode or not (mock or legacy)) and (os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY")):
+        if cloud_mode and (os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY")):
             try:
                 from ..assistant.providers import OpenAIInterpreter
 

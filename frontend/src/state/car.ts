@@ -610,6 +610,29 @@ export function applyIntent(s: CarState, it: Intent, env: Env = { speed: 0 }): {
         'Boliye: "AC 22 pe karo", "garmi lag rahi hai", "romantic gaane chalao", "light laal kar do", "ghar le chalo" ya "sunroof kholo".') };
     case 'thanks':
       return { state: s, reply: r('Anytime!', 'Koi baat nahi!') };
+    case 'shortcut.create':
+      return {
+        state: s,
+        reply: r(
+          `Saved shortcut '${it.trigger}'.`,
+          `Shortcut '${it.trigger}' save kar diya.`,
+          { icon: 'sparkles', label: 'Shortcut Saved', value: it.trigger }
+        ),
+      };
+    case 'shortcut.delete':
+      return {
+        state: s,
+        reply: r(
+          `Deleted shortcut '${it.trigger}'.`,
+          `Shortcut '${it.trigger}' delete kar diya.`,
+          { icon: 'sparkles', label: 'Shortcut Deleted', value: it.trigger }
+        ),
+      };
+    case 'shortcut.list':
+      return {
+        state: s,
+        reply: r('Here are your saved shortcuts.', 'Aapke saved shortcuts ye rahe.'),
+      };
   }
 }
 

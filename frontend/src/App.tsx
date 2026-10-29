@@ -20,6 +20,7 @@ import { Transcript } from './components/Transcript';
 import { SeatView } from './components/SeatView';
 import { PROFILES, removeProfile, useProfileIds, useProfiles } from './lib/profiles';
 import { AddProfileModal } from './components/AddProfileModal';
+import { getShortcuts, saveShortcut, deleteShortcut, matchShortcut, parseTeachUtterance, describeActions } from './lib/shortcuts';
 
 const VIEWS = [['cabin', 'Cabin', Car], ['dash', 'Dashboard', Gauge], ['screen', 'Screen', Monitor], ['seats', 'Seats', Armchair]] as const;
 const NEXT_VIEW = { cabin: 'dash', dash: 'screen', screen: 'seats', seats: 'cabin' } as const;
@@ -92,7 +93,23 @@ function bestTranscript(t: Transcription, ctx: NluContext): string {
   return read.reduce((best, r) => (better(r, best) ? r : best), read[0]).h.trim();
 }
 
-async function route(text: string, parsed: ParseResult, server: BackendHealth | null): Promise<Routed> {
+async function route(text: string, parsed: ParseResult, server: BackendHealth | null, car?: CarState): Promise<Routed> {
+  const teach = parseTeachUtterance(text);
+  if (teach && car) {
+    const actParsed = parseCommand(teach.actionText, {});
+    let recipe = actParsed.intents;
+    if (!recipe.length && server?.llm_ready) {
+      recipe = (await backend.interpret(teach.actionText).catch(() => null))?.intents ?? [];
+    }
+    if (recipe.length > 0) {
+      saveShortcut(car.profile, teach.trigger, recipe);
+      const desc = describeActions(recipe, parsed.lang === 'hi' ? 'hi' : 'en');
+      const say = parsed.lang === 'hi'
+        ? `Shortcut '${teach.trigger}' save kar diya hai (${desc}).`
+        : `Saved shortcut '${teach.trigger}' to ${desc}.`;
+      return { intents: [], say, engine: 'local' };
+    }
+  }
   if (NEGATION.test(text)) {
     // The backend still sees it, e.g. "nahi chahiye" answering its pending question.
     const res = server ? await backend.text(text) : null;
@@ -162,7 +179,7 @@ async function routePremium(text: string, parsed: ParseResult, server: BackendHe
     return { intents: [], say: r.spoken_response || "Sorry, I didn't catch that.", engine: 'cloud', awaitingConfirm: r.status === 'confirm' };
   } catch (e) {
     if (e instanceof ApiError && e.status === 409) return { intents: [], say: 'Still working on the previous command.', engine: 'cloud' };
-    return route(text, parsed, server);
+    return route(text, parsed, server, car);
   }
 }
 
@@ -305,15 +322,54 @@ export default function App() {
       }
     }
     nlu.current = parsed.context;
+    const matched = matchShortcut(carRef.current.profile, text);
+    if (matched && matched.actions.length > 0) {
+      const say = parsed.lang === 'hi'
+        ? `${matched.trigger} activate kar diya.`
+        : `${matched.trigger} activated.`;
+      window.setTimeout(() => finish({
+        intents: matched.actions,
+        say,
+        engine: 'local',
+      }), via === 'voice' ? 0 : Math.max(0, THINK_MS - (Date.now() - started)));
+      return;
+    }
     const online = serverRef.current !== null;
 
     const finish = ({ intents, say, engine: via, awaitingConfirm: awaiting }: Routed) => {
       awaitingConfirm.current = !!awaiting;
-      const ran = intents.length ? runIntents(carRef.current, intents, parsed.lang, { speed: engine.speed }) : null;
+      let toExecute = intents;
+      let shortcutToast: Toast | undefined;
+
+      const createIntent = intents.find((i) => i.type === 'shortcut.create') as { type: 'shortcut.create'; trigger: string } | undefined;
+      if (createIntent) {
+        const recipe = intents.filter((i) => i.type !== 'shortcut.create');
+        saveShortcut(carRef.current.profile, createIntent.trigger, recipe);
+        toExecute = [];
+        shortcutToast = { id: nextId++, icon: 'sparkles', label: 'Shortcut Saved', value: createIntent.trigger };
+      }
+
+      const deleteIntent = intents.find((i) => i.type === 'shortcut.delete') as { type: 'shortcut.delete'; trigger: string } | undefined;
+      if (deleteIntent) {
+        deleteShortcut(carRef.current.profile, deleteIntent.trigger);
+        toExecute = [];
+        shortcutToast = { id: nextId++, icon: 'sparkles', label: 'Shortcut Deleted', value: deleteIntent.trigger };
+      }
+
+      const listIntent = intents.find((i) => i.type === 'shortcut.list');
+      if (listIntent) {
+        const list = getShortcuts(carRef.current.profile);
+        say = list.length
+          ? `Saved shortcuts: ${list.map((s) => `'${s.trigger}' (${describeActions(s.actions)})`).join(', ')}.`
+          : `No custom shortcuts saved yet. Try: "Whenever I say chill mode, set AC to 20 and ambient light to blue".`;
+        toExecute = [];
+      }
+
+      const ran = toExecute.length ? runIntents(carRef.current, toExecute, parsed.lang, { speed: engine.speed }) : null;
       const out = {
         state: ran ? ran.state : carRef.current,
         text: (say || (ran ? ran.text : "Sorry, I didn't catch that.")),
-        toast: ran ? ran.toast : undefined,
+        toast: shortcutToast || (ran ? ran.toast : undefined),
         understood: ran ? ran.understood : (say ? true : false),
       };
       out.text = greeting + out.text;
@@ -919,7 +975,7 @@ export default function App() {
       />
 
       <VoiceDock phase={livePhase} interim={speech.interim} heard={heard} reply={reply} error={speech.error ?? asrError}
-        suggestions={suggestionsFor(reply?.intents ?? [], !!reply?.confirm)} supported={micSupported}
+        suggestions={[...getShortcuts(car.profile).map((s) => s.trigger), ...suggestionsFor(reply?.intents ?? [], !!reply?.confirm)]} supported={micSupported}
         onMic={toggleMic} onSend={handleCommand} />
     </div>
   );
