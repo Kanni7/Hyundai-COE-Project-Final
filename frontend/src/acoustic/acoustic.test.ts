@@ -8,6 +8,7 @@ import { SCENARIOS } from './scenarios.ts';
 import type { SensorMeasurement } from './sensors.ts';
 import { ObjectTracker } from './tracker.ts';
 import { AcousticShieldSimulation } from './simulation.ts';
+import { lineOfSight } from './city.ts';
 import { propagate, type VehicleState } from './vehicle.ts';
 
 const P = DEFAULT_CONFIG.prediction;
@@ -191,17 +192,21 @@ test('protection never activates on elapsed time alone, only on the prediction, 
   assert.equal(ctl.state, 'STANDBY');
   assert.equal(commands.length, 0);
 
+  // CRITICAL must persist for activationConfirmS (3 radar scans at 20 Hz) before the sound starts.
   ctl.update(20.0, fakeAssessment(1.1));
-  assert.notEqual(ctl.state, 'ACTIVE'); // confirmation pending
-  ctl.update(20.03, fakeAssessment(1.07));
+  assert.notEqual(ctl.state, 'ACTIVE');
+  ctl.update(20.05, fakeAssessment(1.05));
+  assert.notEqual(ctl.state, 'ACTIVE'); // confirmation pending: 2 scans only
+  assert.equal(commands.length, 0);
+  ctl.update(20.1, fakeAssessment(1.0));
   assert.equal(ctl.state, 'ACTIVE');
   assert.equal(commands[0].type, 'PRECONDITION_START');
-  near(ctl.activations[0].ttcAtActivation, 1.07, 1e-12);
-  near(ctl.activations[0].leadMarginS, 1.07 - DEFAULT_CONFIG.protection.requiredLeadTimeS, 1e-12);
+  near(ctl.activations[0].ttcAtActivation, 1.0, 1e-12);
+  near(ctl.activations[0].leadMarginS, 1.0 - DEFAULT_CONFIG.protection.requiredLeadTimeS, 1e-12);
 
-  ctl.update(20.1, fakeAssessment(null));
+  ctl.update(20.15, fakeAssessment(null));
   assert.equal(ctl.state, 'ACTIVE'); // hold
-  ctl.update(20.3, fakeAssessment(null));
+  ctl.update(20.35, fakeAssessment(null));
   assert.equal(ctl.state, 'STANDBY');
   assert.equal(commands[1].type, 'PRECONDITION_STOP');
 });
@@ -249,12 +254,12 @@ test('scenario nearmiss: no collision is ever predicted and protection never act
   assert.equal(ideal.sim.contact, null);
   assert.equal(ideal.predicted, false);
   assert.equal(ideal.sim.protection.activations.length, 0);
-  // Default noisy sensor over many seeds: tracking noise may cause brief long-horizon WATCH
-  // predictions, but never a WARNING, CRITICAL or activation.
+  // Default noisy sensor over many seeds: the crossing car appears late from behind the corner
+  // building, so its young track may briefly read WARNING, but never CRITICAL and never the sound.
   for (let seed = 1; seed <= 20; seed++) {
     const { sim, maxLevel } = run('nearmiss', { ...DEFAULT_CONFIG.sensor, seed });
     assert.equal(sim.contact, null);
-    assert.ok(maxLevel <= 1, `seed ${seed}: at most WATCH`);
+    assert.ok(maxLevel <= 2, `seed ${seed}: never CRITICAL`);
     assert.equal(sim.protection.activations.length, 0);
   }
 });
@@ -290,4 +295,50 @@ test('physics is independent of the render frame rate', () => {
   assert.equal(a.ego.x, b.ego.x);
   assert.equal(a.targets[0].y, b.targets[0].y);
   assert.equal(a.assessment.primary?.prediction.ttc, b.assessment.primary?.prediction.ttc);
+});
+
+test('radar line of sight: buildings block detection until the crossing car is in view', () => {
+  assert.equal(lineOfSight(-70, 1.75, 1.75, 66), false, 'corner building blocks the view up the side street');
+  assert.equal(lineOfSight(-70, 1.75, 60, 1.75), true, 'straight down the open road is clear');
+  const seenAt = (occlusion: boolean) => {
+    const config = cloneConfig(DEFAULT_CONFIG);
+    config.sensor = { ...IDEAL_SENSOR, occlusion };
+    const sim = new AcousticShieldSimulation(SCENARIOS[0], config);
+    while (!sim.trackViews.length && sim.time < 6) sim.step();
+    return sim.time;
+  };
+  assert.ok(seenAt(false) < 0.2, 'without buildings the radar sees the car at once');
+  assert.ok(seenAt(true) > 1.5, 'with buildings it is only detected once it clears the corner');
+});
+
+test('other driver braking is detected and the predicted contact clears within 0.6 s', () => {
+  for (let seed = 1; seed <= 10; seed++) {
+    const config = cloneConfig(DEFAULT_CONFIG);
+    config.sensor = { ...DEFAULT_CONFIG.sensor, seed };
+    const sim = new AcousticShieldSimulation(SCENARIOS.find((s) => s.id === 'avoided')!, config);
+    let cleared = -1;
+    while (sim.time < 8) {
+      sim.step();
+      if (sim.time > 3.85 && cleared < 0 && !sim.predictions.get('t1')?.collision) cleared = sim.time;
+    }
+    assert.ok(cleared > 0 && cleared - 3.85 <= 0.6, `seed ${seed}: cleared ${(cleared - 3.85).toFixed(2)} s after braking`);
+    assert.equal(sim.protection.state === 'ACTIVE', false);
+  }
+});
+
+test('no sound for a slow parking-speed bump or when nothing is moving', () => {
+  const config = cloneConfig(DEFAULT_CONFIG);
+  config.sensor = { ...IDEAL_SENSOR };
+  const slow = new AcousticShieldSimulation(SCENARIOS.find((s) => s.id === 'stationary')!, config);
+  slow.ego.speed = 1.5; // 5.4 km/h creep into the stopped car
+  slow.setEgoSetSpeed(1.5);
+  while (slow.time < 100 && !slow.ended) slow.step();
+  assert.ok(slow.contact, 'the bump still happens');
+  assert.equal(slow.protection.activations.length, 0);
+  const parked = new AcousticShieldSimulation(SCENARIOS.find((s) => s.id === 'stationary')!, config);
+  parked.ego.speed = 0;
+  parked.setEgoSetSpeed(0);
+  while (parked.time < 10) parked.step();
+  assert.equal(parked.protection.activations.length, 0);
+  assert.equal(parked.assessment.level, 'NORMAL');
 });

@@ -8,13 +8,16 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { buildCar, type CarModel } from './carModel.js';
+import { BUILDINGS } from './city.ts';
 import { DEG } from './config.ts';
 import type { ThreatLevel } from './decision.ts';
 import { LANE_WIDTH, ROAD_HALF_WIDTH } from './scenarios.ts';
 import type { AcousticShieldSimulation } from './simulation.ts';
 import { corners, type Vec2, type VehicleState } from './vehicle.ts';
 
-export type CameraMode = 'chase' | 'orbit' | 'top';
+/** cinematic: elevated rear three-quarter view that keeps the Hyundai and the main threat in frame. */
+export type CameraMode = 'cinematic' | 'chase' | 'orbit' | 'top';
 
 export const LEVEL_COLORS: Record<ThreatLevel, string> = {
   NORMAL: '#3ec98a',
@@ -23,8 +26,9 @@ export const LEVEL_COLORS: Record<ThreatLevel, string> = {
   CRITICAL: '#ff4d57',
 };
 
-const TARGET_COLORS = ['#a32e33', '#2f5683', '#b88a2e', '#3f6b4a', '#6b4a7a'];
-const EGO_COLOR = '#c8d0da';
+const TARGET_COLORS = ['#9c1d24', '#1f4f8f', '#c08a22', '#2f6a45', '#5d3f78'];
+const EGO_COLOR = '#d4d8dd';
+const SHIELD_COLOR = '#5cc8ff';
 const TRACK_COLOR = '#5cc8ff';
 
 const v3 = (x: number, y: number, h = 0) => new THREE.Vector3(x, h, -y);
@@ -109,91 +113,11 @@ class RectOutline {
 
 // ---------------------------------------------------------------- vehicle model
 
-function sedanMesh(length: number, width: number, color: string): THREE.Group {
-  const g = new THREE.Group();
-  const L = length;
-  const W = width;
-  const half = L / 2;
-  const paint = new THREE.MeshStandardMaterial({ color, metalness: 0.55, roughness: 0.32 });
-  const glass = new THREE.MeshStandardMaterial({ color: '#141b24', metalness: 0.2, roughness: 0.08 });
-  const dark = new THREE.MeshStandardMaterial({ color: '#16181b', roughness: 0.85 });
-
-  // Side silhouette extruded across the width; proportions scale with the configured length.
-  const k = L / 4.6;
-  const body = new THREE.Shape();
-  body.moveTo(-half, 0.36);
-  body.lineTo(half - 0.05, 0.36);
-  body.quadraticCurveTo(half + 0.04, 0.42, half, 0.66);
-  body.lineTo(half - 0.9 * k, 0.84);
-  body.lineTo(half - 1.5 * k, 0.92);
-  body.lineTo(0.3 * k, 1.42);
-  body.lineTo(-0.95 * k, 1.42);
-  body.lineTo(-half + 0.55 * k, 0.99);
-  body.lineTo(-half + 0.02, 0.94);
-  body.quadraticCurveTo(-half - 0.05, 0.8, -half - 0.02, 0.58);
-  body.closePath();
-  const bevel = 0.06;
-  const depth = W - 2 * bevel - 0.02;
-  const bodyGeom = new THREE.ExtrudeGeometry(body, { depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 8 });
-  bodyGeom.translate(0, 0, -depth / 2);
-  const bodyMesh = new THREE.Mesh(bodyGeom, paint);
-  bodyMesh.castShadow = true;
-  bodyMesh.receiveShadow = true;
-  g.add(bodyMesh);
-
-  const cabin = new THREE.Shape();
-  cabin.moveTo(half - 1.46 * k, 0.95);
-  cabin.lineTo(0.3 * k, 1.39);
-  cabin.lineTo(-0.93 * k, 1.39);
-  cabin.lineTo(-half + 0.62 * k, 1.0);
-  cabin.lineTo(-half + 0.62 * k, 0.97);
-  cabin.closePath();
-  const glassDepth = W - 0.06;
-  const glassGeom = new THREE.ExtrudeGeometry(cabin, { depth: glassDepth, bevelEnabled: false });
-  glassGeom.translate(0, 0, -glassDepth / 2);
-  g.add(new THREE.Mesh(glassGeom, glass));
-
-  const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.42, W - 0.04), paint);
-  pillar.position.set(-0.22 * k, 1.17, 0);
-  g.add(pillar);
-
-  const wheelGeom = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 24);
-  wheelGeom.rotateX(Math.PI / 2);
-  const rimGeom = new THREE.CylinderGeometry(0.21, 0.21, 0.25, 16);
-  rimGeom.rotateX(Math.PI / 2);
-  const rimMat = new THREE.MeshStandardMaterial({ color: '#9aa3ad', metalness: 0.8, roughness: 0.3 });
-  for (const wx of [half - 0.88 * k, -half + 0.84 * k]) for (const side of [1, -1]) {
-    const w = new THREE.Mesh(wheelGeom, dark);
-    w.position.set(wx, 0.34, side * (W / 2 - 0.13));
-    w.castShadow = true;
-    g.add(w);
-    const r = new THREE.Mesh(rimGeom, rimMat);
-    r.position.copy(w.position);
-    g.add(r);
-  }
-
-  const head = new THREE.MeshStandardMaterial({ color: '#f4f7ff', emissive: '#dfe8ff', emissiveIntensity: 0.6 });
-  const tail = new THREE.MeshStandardMaterial({ color: '#5a0d10', emissive: '#ff1f2d', emissiveIntensity: 0.35 });
-  for (const side of [1, -1]) {
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.42), head);
-    h.position.set(half - 0.02, 0.68, side * (W / 2 - 0.32));
-    g.add(h);
-    const t = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 0.46), tail);
-    t.position.set(-half - 0.02, 0.8, side * (W / 2 - 0.3));
-    t.name = 'tail';
-    g.add(t);
-  }
-  const grille = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, W * 0.5), dark);
-  grille.position.set(half + 0.005, 0.52, 0);
-  g.add(grille);
-  return g;
-}
-
 interface VehicleView {
+  car: CarModel;
   group: THREE.Group;
-  dims: string;
-  color: string;
-  tails: THREE.MeshStandardMaterial[];
+  tailBase: THREE.Color;
+  roll: number;
 }
 
 // ---------------------------------------------------------------- scene
@@ -201,6 +125,8 @@ interface VehicleView {
 export class ShieldScene {
   onPick: (id: string | null) => void = () => {};
   private renderer: THREE.WebGLRenderer;
+  private shieldWaves: THREE.Mesh[] = [];
+  private shieldPower = 0;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
   private controls: OrbitControls;
@@ -208,8 +134,9 @@ export class ShieldScene {
   private container: HTMLElement;
   private resizeObserver: ResizeObserver;
   private vehicles = new Map<string, VehicleView>();
-  private mode: CameraMode = 'chase';
+  private mode: CameraMode = 'cinematic';
   private lastEgo: THREE.Vector3 | null = null;
+  private camLook = new THREE.Vector3();
   private targetPaths = new Map<string, { path: Ribbon; truth: Ribbon; egoGhost: RectOutline; tgtGhost: RectOutline; trackBox: RectOutline; los: THREE.Line }>();
   private egoPath: Ribbon;
   private contactMarker: THREE.Mesh;
@@ -241,11 +168,25 @@ export class ShieldScene {
     this.controls.maxDistance = 220;
     this.controls.enabled = false;
 
-    const sky = new THREE.Color('#aebfd0');
-    this.scene.background = sky;
-    this.scene.fog = new THREE.Fog(sky, 160, 620);
-    this.scene.add(new THREE.HemisphereLight('#dfe9f5', '#4b4f45', 1.1));
-    this.sun = new THREE.DirectionalLight('#fff3e2', 2.4);
+    // Late-afternoon sky gradient; fog matches the horizon colour so the city fades into it.
+    const skyCanvas = document.createElement('canvas');
+    skyCanvas.width = 4;
+    skyCanvas.height = 256;
+    const sg = skyCanvas.getContext('2d')!;
+    const grad = sg.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, '#5f86b8');
+    grad.addColorStop(0.55, '#a9c1da');
+    grad.addColorStop(1, '#e4d9c8');
+    sg.fillStyle = grad;
+    sg.fillRect(0, 0, 4, 256);
+    const skyTex = new THREE.CanvasTexture(skyCanvas);
+    skyTex.colorSpace = THREE.SRGBColorSpace;
+    this.scene.background = skyTex;
+    this.scene.environment = this.outdoorEnv();
+    this.scene.environmentIntensity = 0.9;
+    this.scene.fog = new THREE.Fog('#d6d6d0', 140, 560);
+    this.scene.add(new THREE.HemisphereLight('#dfe9f5', '#4b4f45', 0.9));
+    this.sun = new THREE.DirectionalLight('#ffe9cf', 2.6);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera;
@@ -290,6 +231,17 @@ export class ShieldScene {
     this.measurementDots.frustumCulled = false;
     this.scene.add(this.measurementDots);
 
+    // Expanding rings around the Hyundai while the shield is active (visual cue only).
+    for (let i = 0; i < 3; i++) {
+      const wave = new THREE.Mesh(new THREE.RingGeometry(0.92, 1, 64), new THREE.MeshBasicMaterial({ color: new THREE.Color(SHIELD_COLOR), transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+      wave.rotation.x = -Math.PI / 2;
+      wave.renderOrder = 5;
+      wave.visible = false;
+      this.shieldWaves.push(wave);
+      this.scene.add(wave);
+    }
+
+
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     this.resize();
@@ -299,6 +251,30 @@ export class ShieldScene {
   }
 
   // ---------------------------------------------------------------- static world
+
+  /** Sky-dome reflection map (blue zenith, bright horizon, dark street, a hot sun spot) so paint reads as outdoors. */
+  private outdoorEnv() {
+    const env = new THREE.Scene();
+    const geo = new THREE.SphereGeometry(50, 48, 24);
+    const col: number[] = [];
+    const pos = geo.getAttribute('position');
+    const sky = new THREE.Color('#4f79b0'), horizon = new THREE.Color('#e9e4da'), ground = new THREE.Color('#3a3d40'), c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i) / 50;
+      if (y >= 0) c.copy(horizon).lerp(sky, Math.pow(y, 0.6)); else c.copy(horizon).lerp(ground, Math.min(1, -y * 6));
+      col.push(c.r * 1.3, c.g * 1.3, c.b * 1.3);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    env.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+    const sun = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff1dc').multiplyScalar(6) }));
+    sun.position.set(30, 32, 20);
+    env.add(sun);
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    const tex = pm.fromScene(env, 0.02).texture;
+    pm.dispose();
+    geo.dispose();
+    return tex;
+  }
 
   private buildEnvironment() {
     const add = (o: THREE.Object3D) => { this.scene.add(o); return o; };
@@ -380,38 +356,25 @@ export class ShieldScene {
       add(inst);
     }
 
-    // Buildings and trees, seeded so the city is identical on every load.
-    const rand = mulberry(7);
+    // Buildings come from the shared city map (city.ts) the radar line-of-sight model also uses.
     const facade = ['#9a9c9f', '#b3aa9c', '#7f858c', '#c2bdb4', '#8e8a84', '#a6aeb6'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 }));
     const windowMat = new THREE.MeshStandardMaterial({ color: '#3b4654', roughness: 0.3, metalness: 0.4 });
-    for (const sx of [1, -1]) for (const sy of [1, -1]) {
-      for (const alongX of [true, false]) {
-        let s = e + walk + 6;
-        while (s < 360) {
-          const w = 10 + rand() * 18;
-          const d = 10 + rand() * 14;
-          const h = 6 + rand() * (s < 120 ? 26 : 14);
-          const set = e + walk + 4 + rand() * 6;
-          const cx = alongX ? sx * (s + w / 2) : sx * (set + d / 2);
-          const cy = alongX ? sy * (set + d / 2) : sy * (s + w / 2);
-          const bw = alongX ? w : d;
-          const bd = alongX ? d : w;
-          const b = new THREE.Mesh(new THREE.BoxGeometry(bw, h, bd), facade[Math.floor(rand() * facade.length)]);
-          b.position.copy(v3(cx, cy, h / 2));
-          b.castShadow = s < 160;
-          b.receiveShadow = true;
-          add(b);
-          // Window bands on the street-facing side (near blocks only, to bound draw calls).
-          for (let fy = 3; s < 160 && fy < h - 1; fy += 3.2) {
-            const band = new THREE.Mesh(new THREE.BoxGeometry(alongX ? bw * 0.86 : 0.05, 1.3, alongX ? 0.05 : bw * 0.86), windowMat);
-            const face = alongX ? v3(cx, cy - sy * (bd / 2 + 0.03), fy) : v3(cx - sx * (bw / 2 + 0.03), cy, fy);
-            band.position.copy(face);
-            add(band);
-          }
-          s += w + 3 + rand() * 6;
-        }
+    for (const bld of BUILDINGS) {
+      const { cx, cy, w: bw, d: bd, h, alongX, sx, sy, s } = bld;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(bw, h, bd), facade[bld.facade]);
+      b.position.copy(v3(cx, cy, h / 2));
+      b.castShadow = s < 160;
+      b.receiveShadow = true;
+      add(b);
+      // Window bands on the street-facing side (near blocks only, to bound draw calls).
+      for (let fy = 3; s < 160 && fy < h - 1; fy += 3.2) {
+        const band = new THREE.Mesh(new THREE.BoxGeometry(alongX ? bw * 0.86 : 0.05, 1.3, alongX ? 0.05 : bw * 0.86), windowMat);
+        const face = alongX ? v3(cx, cy - sy * (bd / 2 + 0.03), fy) : v3(cx - sx * (bw / 2 + 0.03), cy, fy);
+        band.position.copy(face);
+        add(band);
       }
     }
+    const rand = mulberry(11);
     const trunks: THREE.Matrix4[] = [];
     const crowns: THREE.Matrix4[] = [];
     for (const sx of [1, -1]) for (const sy of [1, -1]) for (const alongX of [true, false]) {
@@ -484,17 +447,20 @@ export class ShieldScene {
   // ---------------------------------------------------------------- per-frame update
 
   private vehicleView(v: VehicleState, index: number): VehicleView {
-    const dims = `${v.length.toFixed(2)}x${v.width.toFixed(2)}`;
     let view = this.vehicles.get(v.id);
-    if (view && view.dims === dims) return view;
-    if (view) this.disposeObject(view.group);
+    if (view) return view;
     const color = v.kind === 'ego' ? EGO_COLOR : TARGET_COLORS[index % TARGET_COLORS.length];
-    const group = sedanMesh(v.length, v.width, color);
+    const car = buildCar({ paint: color });
+    car.setLights(0.45); // daytime: running lamps lit, not glaring
+    const group = new THREE.Group();
+    group.add(car.group);
     group.userData.vehicleId = v.id;
-    const tails: THREE.MeshStandardMaterial[] = [];
-    group.traverse((o) => { if (o.name === 'tail') tails.push((o as THREE.Mesh).material as THREE.MeshStandardMaterial); });
+    car.group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && m.geometry.type !== 'PlaneGeometry') m.castShadow = true;
+    });
     this.scene.add(group);
-    view = { group, dims, color, tails };
+    view = { car, group, tailBase: car.lights.tail.color.clone(), roll: 0 };
     this.vehicles.set(v.id, view);
     return view;
   }
@@ -531,18 +497,25 @@ export class ShieldScene {
     // Vehicles.
     const all = [sim.ego, ...sim.targets];
     const live = new Set(all.map((v) => v.id));
+    const levelOf = new Map(sim.assessment.targets.map((t) => [t.targetId, t.level]));
     all.forEach((v, i) => {
       const view = this.vehicleView(v, i - 1);
+      // The model is authored at Verna size; stretch it to the simulated footprint (also follows live size edits).
+      view.car.group.scale.set(v.length / view.car.spec.L, 1, v.width / view.car.spec.W);
       const p = pose(v);
+      const prev = view.group.position.clone();
       view.group.position.copy(v3(p.x, p.y));
       view.group.rotation.y = p.heading;
+      view.roll += Math.min(5, prev.distanceTo(view.group.position));
+      view.car.setRoll(view.roll);
       const braking = v.accel < -1 && v.speed > 0.1;
-      for (const t of view.tails) t.emissiveIntensity = braking ? 2.4 : 0.35;
+      view.car.lights.tail.color.copy(view.tailBase).multiplyScalar(braking ? 3.2 : 1);
+      const lvl = levelOf.get(v.id);
+      view.car.setOutline(lvl === 'CRITICAL' ? 0.65 + 0.35 * Math.sin(this.clock * 10) : lvl === 'WARNING' ? 0.4 : 0);
     });
     for (const [id, view] of this.vehicles) if (!live.has(id)) { this.disposeObject(view.group); this.vehicles.delete(id); }
 
     // Per-target overlays.
-    const levelOf = new Map(sim.assessment.targets.map((t) => [t.targetId, t.level]));
     const tracked = new Map(sim.trackViews.map((v) => [v.track.objectId, v]));
     for (const [id, o] of this.targetPaths) {
       if (!live.has(id) || id === 'ego') {
@@ -626,18 +599,51 @@ export class ShieldScene {
     this.measurementDots.count = n;
     this.measurementDots.instanceMatrix.needsUpdate = true;
 
+    // Shield rings.
+    this.shieldPower += ((sim.protection.state === 'ACTIVE' ? 1 : 0) - this.shieldPower) * (1 - Math.exp(-opts.dt * 6));
+    this.shieldWaves.forEach((w, i) => {
+      const phase = (this.clock * 0.9 + i / this.shieldWaves.length) % 1;
+      w.visible = this.shieldPower > 0.01;
+      w.position.set(ego.x, 0.15, -ego.y);
+      w.scale.setScalar(2.6 + phase * 13);
+      (w.material as THREE.MeshBasicMaterial).opacity = (1 - phase) * 0.85 * this.shieldPower;
+    });
+
     // Camera.
-    this.updateCamera(ego, opts.dt);
+    const threat = sim.targets.find((t) => t.id === primaryId)
+      ?? sim.targets.reduce<VehicleState | null>((best, t) => (!best || Math.hypot(t.x - sim.ego.x, t.y - sim.ego.y) < Math.hypot(best.x - sim.ego.x, best.y - sim.ego.y) ? t : best), null);
+    this.updateCamera(ego, opts.dt, threat ? pose(threat) : null);
     this.sun.position.set(ego.x + 60, 90, -ego.y + 40);
     this.sun.target.position.set(ego.x, 0, -ego.y);
+    this.scene.updateMatrixWorld();
+    for (const v of this.vehicles.values()) v.car.updateFlares(this.camera, 0.12);
     this.renderer.render(this.scene, this.camera);
   }
 
-  private updateCamera(ego: { x: number; y: number; heading: number }, dt: number) {
+  private updateCamera(ego: { x: number; y: number; heading: number }, dt: number, threat: { x: number; y: number } | null) {
     const egoPos = v3(ego.x, ego.y);
     const fwd = new THREE.Vector3(Math.cos(ego.heading), 0, -Math.sin(ego.heading));
     const k = 1 - Math.exp(-dt * 5);
-    if (this.mode === 'chase') {
+    if (this.mode === 'cinematic') {
+      // Stay over the Hyundai's own road (buildings line it) and look across to the threat: camera behind the
+      // car, or ahead of it when the threat comes from behind.
+      const d = threat ? v3(threat.x, threat.y).sub(egoPos) : null;
+      const sep = d ? d.length() : 0;
+      const near = !!d && sep > 0.5 && sep < 160;
+      const ahead = near && d!.dot(fwd) < -0.3 * sep ? -1 : 1;
+      // Low and close so the Hyundai fills the lower third; pulls back a little as the threat closes in.
+      const dist = near ? THREE.MathUtils.clamp(10.5 + (40 - Math.min(sep, 40)) * 0.12, 10.5, 15) : 10.5;
+      // Aim just ahead of the car; swing toward the threat only once it is within ~60 m.
+      const w = near ? THREE.MathUtils.clamp((60 - sep) / 40, 0, 1) : 0;
+      const look = egoPos.clone().addScaledVector(fwd, 4 * (1 - w)).setY(0.9);
+      if (near) look.addScaledVector(d!, (Math.min(sep, 25) / sep) * 0.5 * w);
+      const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+      const desired = egoPos.clone().addScaledVector(fwd, -ahead * dist).addScaledVector(right, ahead * 1.8).setY(2.6 + dist * 0.28);
+      const kc = 1 - Math.exp(-dt * 2.2);
+      if (!this.lastEgo) { this.camera.position.copy(desired); this.camLook.copy(look); }
+      else { this.camera.position.lerp(desired, kc); this.camLook.lerp(look, kc); }
+      this.camera.lookAt(this.camLook);
+    } else if (this.mode === 'chase') {
       const desired = egoPos.clone().addScaledVector(fwd, -11).setY(4.3);
       if (!this.lastEgo) this.camera.position.copy(desired);
       else this.camera.position.lerp(desired, k);

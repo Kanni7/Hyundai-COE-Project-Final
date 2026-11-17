@@ -98,8 +98,12 @@ export class SimulatedSensorProvider implements SensorProvider {
     this.config = { ...config };
   }
 
-  /** Simulator-only: sample ground truth if a scan is due. */
-  observe(now: number, ego: VehicleState, targets: VehicleState[]) {
+  /**
+   * Simulator-only: sample ground truth if a scan is due. `canSee` is the environment's
+   * line-of-sight test: a radar return needs an unobstructed path, so a car hidden behind
+   * a building produces no detection.
+   */
+  observe(now: number, ego: VehicleState, targets: VehicleState[], canSee: (target: VehicleState) => boolean = () => true) {
     const c = this.config;
     if (now + 1e-9 < this.nextScan) return;
     this.nextScan = now + 1 / Math.max(1, c.updateRateHz);
@@ -112,6 +116,7 @@ export class SimulatedSensorProvider implements SensorProvider {
       const range = Math.hypot(dx, dy);
       const azimuth = wrapAngle(Math.atan2(dy, dx) - ego.heading);
       if (range > c.maxRangeM || Math.abs(azimuth) > (c.fovDeg * DEG) / 2 + 1e-9) continue;
+      if (c.occlusion && !canSee(t)) continue;
       if (this.rand() < c.dropoutProbability) continue;
       const vT = velocity(t);
       const rangeRate = range > 1e-9 ? ((vT.x - vE.x) * dx + (vT.y - vE.y) * dy) / range : 0;

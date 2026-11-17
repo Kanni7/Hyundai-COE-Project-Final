@@ -29,7 +29,7 @@ export interface PredictionConfig {
 }
 
 export interface DecisionConfig {
-  /** Collisions predicted with a lower closing speed (m/s) are only monitored (WATCH). */
+  /** Collisions predicted with a lower closing speed (m/s) are only monitored (WATCH): parking-speed bumps never trigger the sound. */
   minClosingSpeedMps: number;
   /** Tracks below this confidence (0..1) cannot raise WARNING or CRITICAL. */
   minTrackConfidence: number;
@@ -73,6 +73,8 @@ export interface SensorConfig {
   dropoutProbability: number;
   /** Probability (0..1) that a delivered detection is corrupt (NaN fields). */
   invalidProbability: number;
+  /** Buildings block the radar: only targets with a clear line of sight are detected. */
+  occlusion: boolean;
   /** When true the sensor delivers nothing (blackout), producing stale tracks. */
   blackout: boolean;
   /** PRNG seed: the whole simulation is deterministic for a given seed. */
@@ -111,14 +113,15 @@ export const DEFAULT_CONFIG: AcousticShieldConfig = {
   physics: { fixedDtS: 0.01, maxStepsPerFrame: 40 },
   prediction: { horizonS: 6, maxSampleStepS: 0.02, constantMotionEps: 1e-3, pathSampleS: 0.1 },
   decision: {
-    minClosingSpeedMps: 1.0,
+    minClosingSpeedMps: 2.5, // ~9 km/h
     minTrackConfidence: 0.6,
     warningTtcS: 3.0,
     criticalTtcS: 1.2,
     watchCpaDistanceM: 5.0,
     maxSensorAgeS: 0.25,
   },
-  protection: { requiredLeadTimeS: 0.3, activationConfirmS: 0.03, deactivateHoldS: 0.15 },
+  // activationConfirmS 0.1 s at 20 Hz: CRITICAL must hold across 3 consecutive radar scans before the sound plays.
+  protection: { requiredLeadTimeS: 0.3, activationConfirmS: 0.1, deactivateHoldS: 0.15 },
   sensor: {
     updateRateHz: 20,
     latencyS: 0.05,
@@ -130,6 +133,7 @@ export const DEFAULT_CONFIG: AcousticShieldConfig = {
     orientationNoiseDeg: 1,
     dropoutProbability: 0.02,
     invalidProbability: 0,
+    occlusion: true,
     blackout: false,
     seed: 20261109,
   },
