@@ -12,6 +12,7 @@
  * Rendering is decoupled: the UI calls advance(realDt * timeScale) and reads state.
  */
 
+import { lineOfSight } from './city.ts';
 import { cloneConfig, type AcousticShieldConfig } from './config.ts';
 import { predictCollision, rectanglesOverlap, type CollisionPrediction } from './collision.ts';
 import { ThresholdDecisionEngine, type SafetyDecisionEngine, type ThreatAssessment, type ThreatLevel } from './decision.ts';
@@ -229,7 +230,7 @@ export class AcousticShieldSimulation implements VehicleStateProvider {
   /** Runs the sensing/prediction/decision chain at the current time without moving vehicles. */
   evaluate() {
     const now = this.time;
-    this.sensor.observe(now, this.ego, this.targets);
+    this.sensor.observe(now, this.ego, this.targets, (t) => this.visible(t));
     const measurements = this.sensor.poll(now);
     if (measurements.length) this.lastMeasurements = measurements;
     const { created, deleted, rejected } = this.tracker.update(measurements, now);
@@ -253,6 +254,16 @@ export class AcousticShieldSimulation implements VehicleStateProvider {
       this.log('level', `${previous} → ${this.assessment.level}: ${this.assessment.primary?.reason ?? 'no tracked objects'}`);
     }
     this.protection.update(now, this.assessment);
+  }
+
+  /**
+   * Radar line of sight: the surround radars sit at the Hyundai's four corners; a target is
+   * detectable when any of them has a clear path to its centre or any of its corners.
+   */
+  visible(target: VehicleState): boolean {
+    const from = [{ x: this.ego.x, y: this.ego.y }, ...corners(this.ego)];
+    const to = [{ x: target.x, y: target.y }, ...corners(target)];
+    return from.some((a) => to.some((b) => lineOfSight(a.x, a.y, b.x, b.y)));
   }
 
   private recordHistory() {

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Ear, Map as MapIcon, OctagonX, Orbit, Pause, Play, Plus, Radar, RotateCcw, Trash2, Video, Volume2, VolumeX, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { Clapperboard, Ear, Map as MapIcon, OctagonX, Orbit, Pause, Play, Plus, Radar, RotateCcw, SlidersHorizontal, Snail, Trash2, Video, Volume2, VolumeX, X } from 'lucide-react';
 import { DEFAULT_CONFIG, DEG, cloneConfig, fromKmh, toKmh, type AcousticShieldConfig } from '../acoustic/config';
 import { LEVEL_COLORS, ShieldScene, type CameraMode } from '../acoustic/scene3d';
 import { SCENARIOS } from '../acoustic/scenarios';
@@ -7,11 +7,18 @@ import { AcousticShieldSimulation, type HistorySample } from '../acoustic/simula
 import { MAX_PINK_LEVEL, PinkNoiseSink } from '../acoustic/pinkNoise';
 import { norm, wrapAngle } from '../acoustic/vehicle';
 import type { ThreatLevel } from '../acoustic/decision';
+import '@fontsource-variable/manrope/wght.css';
 import './AcousticShield.css';
 
 type RunState = 'idle' | 'running' | 'paused' | 'ended';
 
 const TIME_SCALES = [0.1, 0.25, 0.5, 1, 2];
+const STEPS = [
+  { title: 'Detect', text: 'Radar tracks every car around the Hyundai.' },
+  { title: 'Predict', text: 'Paths are projected ahead to find a collision.' },
+  { title: 'Protect', text: 'A short sound primes the ear before the crash noise.' },
+  { title: 'Impact', text: 'Shield timing is checked against the moment of impact.' },
+];
 const fmt = (n: number | null | undefined, digits = 2) => (n === null || n === undefined || !Number.isFinite(n) ? '—' : n.toFixed(digits));
 const deg = (rad: number) => (rad / DEG);
 
@@ -21,9 +28,32 @@ function Slider({ label, value, min, max, step, unit, digits = 0, onChange }: {
   return (
     <label className="acs-slider">
       <span>{label}</span>
-      <input type="range" min={min} max={max} step={step} value={Math.min(max, Math.max(min, value))} onChange={(e) => onChange(Number(e.target.value))} />
+      <input type="range" min={min} max={max} step={step} value={Math.min(max, Math.max(min, value))} onChange={(e) => onChange(Number(e.target.value))}
+        style={{ '--pct': `${((Math.min(max, Math.max(min, value)) - min) / (max - min)) * 100}%` } as CSSProperties} />
       <em>{fmt(value, digits)}{unit ? ` ${unit}` : ''}</em>
     </label>
+  );
+}
+
+/** Top-down sketch of each scenario: white = Hyundai, red outline = other car, arrows = direction of travel. */
+function ScenarioGlyph({ id }: { id: string }) {
+  const m = `ah-${id}`;
+  const car = (x: number, y: number, w: number, h: number, ego = false) => <rect x={x} y={y} width={w} height={h} rx={1.6} className={ego ? 'g-ego' : 'g-other'} />;
+  const go = (d: string) => <path d={d} className="g-path" markerEnd={`url(#${m})`} />;
+  const stop = (d: string) => <path d={d} className="g-stop" />;
+  const art: Record<string, ReactNode> = {
+    side: <>{car(12, 19, 6, 9, true)}{go('M15 18 V12')}{car(1, 9, 8, 5)}{go('M10 11.5 H17')}</>,
+    rear: <>{car(12, 3, 6, 9, true)}{go('M15 2.5 V1')}{car(12, 20, 6, 9)}{go('M15 19 V15')}</>,
+    headon: <>{car(12, 19, 6, 9, true)}{go('M15 18 V14')}{car(12, 2, 6, 9)}{go('M15 12 V15.5')}</>,
+    nearmiss: <>{car(12, 19, 6, 9, true)}{go('M15 18 V12')}{car(20, 6, 8, 5)}<path d="M3 8.5 H18" className="g-trail" /></>,
+    avoided: <>{car(12, 19, 6, 9, true)}{go('M15 18 V12')}{car(1, 9, 8, 5)}{stop('M11 7.5 V15.5')}</>,
+    stationary: <>{car(12, 19, 6, 9, true)}{go('M15 18 V13')}{car(12, 2, 6, 9)}{stop('M10.5 12.5 H19.5')}</>,
+  };
+  return (
+    <svg className="acs-glyph" viewBox="0 0 30 30" aria-hidden="true">
+      <defs><marker id={m} viewBox="0 0 6 6" refX={3} refY={3} markerWidth={4} markerHeight={4} orient="auto"><path d="M0 0 L6 3 L0 6 z" className="g-head" /></marker></defs>
+      {art[id] ?? car(12, 19, 6, 9, true)}
+    </svg>
   );
 }
 
@@ -125,10 +155,13 @@ export function AcousticShield({ onClose }: { onClose: () => void }) {
   const [scenarioId, setScenarioId] = useState(SCENARIOS[0].id);
   const [run, setRun] = useState<RunState>('idle');
   const [timeScale, setTimeScale] = useState(1);
-  const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
+  const [cameraMode, setCameraMode] = useState<CameraMode>('cinematic');
   const [selectedId, setSelectedId] = useState<string | null>('t1');
-  const [showTruth, setShowTruth] = useState(true);
-  const [showRadar, setShowRadar] = useState(true);
+  const [showTruth, setShowTruth] = useState(false);
+  const [showRadar, setShowRadar] = useState(false);
+  // Presenter mode shows a few demo controls; Advanced brings back the full engineering panels.
+  const [advanced, setAdvanced] = useState(false);
+  const [speeds, setSpeeds] = useState(() => ({ ego: toKmh(SCENARIOS[0].ego.speed), other: toKmh(SCENARIOS[0].targets[0]?.speed ?? 0) }));
   const [lateral, setLateral] = useState<Record<string, number>>({});
   const [noiseScale, setNoiseScale] = useState(1);
   const [audioUi, setAudioUi] = useState({ enabled: false, muted: false, level: audio.level });
@@ -190,11 +223,49 @@ export function AcousticShield({ onClose }: { onClose: () => void }) {
     sim.load(sc);
     setLateral({});
     setSelectedId(sc.targets[0]?.id ?? null);
+    setSpeeds({ ego: toKmh(sc.ego.speed), other: toKmh(sc.targets[0]?.speed ?? 0) });
     setRun('idle');
     bump();
   };
 
-  const reset = () => loadScenario(scenarioId);
+  // Presenter speeds: before Start they set the starting speed; while running the Hyundai cruises to the new
+  // set speed and the other car changes speed at once. Replay keeps the presenter's chosen speeds.
+  const applySpeeds = (s: { ego: number; other: number }, running: boolean) => {
+    if (!running) sim.ego.speed = fromKmh(s.ego);
+    sim.setEgoSetSpeed(fromKmh(s.ego));
+    const other = sim.targets[0];
+    if (other) sim.updateTarget(other.id, { speed: fromKmh(s.other) });
+    else if (!sim.ended) sim.evaluate();
+    bump();
+  };
+  const changeSpeeds = (patch: Partial<{ ego: number; other: number }>) => {
+    const next = { ...speeds, ...patch };
+    setSpeeds(next);
+    if (sim.ended) return;
+    // A new speed for a car that "Brake other car" stopped means it drives on: release that brake.
+    const other = sim.targets[0];
+    if (patch.other !== undefined && other && other.accel < -1) sim.updateTarget(other.id, { accel: 0 });
+    applySpeeds(next, run === 'running' || run === 'paused');
+  };
+
+  // Hold-to-brake for pointer and keyboard (Space/Enter); releasing, leaving or losing focus lets go.
+  const setBrake = (on: boolean) => { if (sim.egoBraking !== on) { sim.setEgoBraking(on); bump(); } };
+  const holdBrake = {
+    onPointerDown: () => setBrake(true),
+    onPointerUp: () => setBrake(false),
+    onPointerLeave: () => setBrake(false),
+    onBlur: () => setBrake(false),
+    onKeyDown: (e: KeyboardEvent) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); setBrake(true); } },
+    onKeyUp: (e: KeyboardEvent) => { if (e.key === ' ' || e.key === 'Enter') setBrake(false); },
+  };
+
+  const reset = () => {
+    if (advanced) { loadScenario(scenarioId); return; }
+    sim.load(scenario);
+    applySpeeds(speeds, false);
+    setSelectedId(sim.targets[0]?.id ?? null);
+    setRun('idle');
+  };
 
   // Telemetry focus: the selected target, else the most critical one, else the first.
   const focusId = (selectedId && sim.targets.some((t) => t.id === selectedId) ? selectedId : null)
@@ -213,6 +284,8 @@ export function AcousticShield({ onClose }: { onClose: () => void }) {
   const scenario = SCENARIOS.find((s) => s.id === scenarioId)!;
   const events = sim.events.slice(-80).reverse();
 
+  // Presenter story: 0 watching, 1 collision predicted, 2 shield active, 3 impact.
+  const stepIndex = sim.contact ? 3 : active ? 2 : pred?.collision ? 1 : 0;
   const statusTitle = protection.state === 'IMPACT' ? 'Impact reached'
     : active ? 'Acoustic Shield Active'
       : protection.state === 'ARMED' ? 'Armed: collision warning'
@@ -266,35 +339,84 @@ export function AcousticShield({ onClose }: { onClose: () => void }) {
           <Ear />
           <div>
             <b>Hyundai Acoustic Shield</b>
-            <small>Collision prediction &amp; pre-impact acoustic preconditioning · engineering simulator</small>
+            <small>{advanced ? 'Collision prediction & pre-impact acoustic preconditioning · engineering simulator' : 'Predicts a crash and protects your hearing before impact'}</small>
           </div>
         </div>
         <div className="acs-transport">
-          <select value={scenarioId} disabled={run === 'running'} onChange={(e) => loadScenario(e.target.value)} aria-label="Scenario">
-            {SCENARIOS.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          {advanced && (
+            <select value={scenarioId} disabled={run === 'running'} onChange={(e) => loadScenario(e.target.value)} aria-label="Scenario">
+              {SCENARIOS.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
           {run === 'idle' && <button className="primary" onClick={() => setRun('running')}><Play /> Start</button>}
           {run === 'running' && <button onClick={() => setRun('paused')}><Pause /> Pause</button>}
           {run === 'paused' && <button className="primary" onClick={() => setRun('running')}><Play /> Resume</button>}
-          {run === 'ended' && <button disabled><Play /> Ended</button>}
+          {run === 'ended' && <button className="primary" onClick={() => { reset(); setRun('running'); }}><RotateCcw /> Replay</button>}
           <button onClick={reset}><RotateCcw /> Reset</button>
-          <label className="acs-scale">
-            <span>Speed</span>
-            <select value={timeScale} onChange={(e) => setTimeScale(Number(e.target.value))} aria-label="Simulation time scale">
-              {TIME_SCALES.map((s) => <option key={s} value={s}>{s}×</option>)}
-            </select>
-          </label>
+          {advanced ? (
+            <label className="acs-scale">
+              <span>Speed</span>
+              <select value={timeScale} onChange={(e) => setTimeScale(Number(e.target.value))} aria-label="Simulation time scale">
+                {TIME_SCALES.map((s) => <option key={s} value={s}>{s}×</option>)}
+              </select>
+            </label>
+          ) : (
+            <button className={timeScale < 1 ? 'on' : ''} onClick={() => setTimeScale(timeScale < 1 ? 1 : 0.25)} aria-pressed={timeScale < 1}><Snail /> Slow motion</button>
+          )}
           <div className="acs-seg" role="group" aria-label="Camera">
+            <button className={cameraMode === 'cinematic' ? 'on' : ''} onClick={() => setCameraMode('cinematic')} title="Keeps both cars in frame"><Clapperboard /> Cinematic</button>
             <button className={cameraMode === 'chase' ? 'on' : ''} onClick={() => setCameraMode('chase')} title="Third-person follow camera"><Video /> Chase</button>
             <button className={cameraMode === 'orbit' ? 'on' : ''} onClick={() => setCameraMode('orbit')} title="Drag to rotate, scroll to zoom; follows the Hyundai"><Orbit /> Orbit</button>
             <button className={cameraMode === 'top' ? 'on' : ''} onClick={() => setCameraMode('top')} title="Bird's-eye technical view"><MapIcon /> Top</button>
           </div>
+          <button className={advanced ? 'on' : ''} onClick={() => setAdvanced(!advanced)} aria-pressed={advanced} title="Show every engineering parameter"><SlidersHorizontal /> Advanced</button>
         </div>
         <button className="acs-close" onClick={onClose} aria-label="Close simulator"><X /></button>
       </header>
 
-      <div className="acs-body">
-        <aside className="acs-panel acs-left">
+      <div className={`acs-body ${advanced ? '' : 'simple'}`}>
+        {!advanced && (
+          <aside className="acs-panel acs-left acs-presenter">
+            <div className="acs-p-group">
+              <h3>Scenario</h3>
+              <div className="acs-scn-list" role="radiogroup" aria-label="Scenario">
+                {SCENARIOS.map((s) => (
+                  <button key={s.id} role="radio" aria-checked={s.id === scenarioId} className={`acs-scn ${s.id === scenarioId ? 'on' : ''}`} disabled={run === 'running'} onClick={() => loadScenario(s.id)}>
+                    <ScenarioGlyph id={s.id} />
+                    <span>{s.name.split(' · ')[1] ?? s.name}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="acs-scn-summary">{scenario.summary}</p>
+            </div>
+            <div className="acs-p-group">
+              <h3>Speed</h3>
+              <Slider label="Hyundai" value={speeds.ego} min={0} max={120} step={5} unit="km/h" onChange={(v) => changeSpeeds({ ego: v })} />
+              {sim.targets[0] && <Slider label={sim.targets[0].label} value={speeds.other} min={0} max={120} step={5} unit="km/h" onChange={(v) => changeSpeeds({ other: v })} />}
+            </div>
+            <div className="acs-p-group">
+              <h3>Driver input</h3>
+              <button
+                className={`acs-act ${sim.egoBraking ? 'on' : ''}`}
+                disabled={run !== 'running'}
+                {...holdBrake}
+              ><b>Brake Hyundai</b><small>Hold · {config.egoControl.maxBrakeMps2} m/s²</small></button>
+              {sim.targets[0] && (
+                <button
+                  className={`acs-act ${sim.targets[0].accel < -1 ? 'on' : ''}`}
+                  disabled={run !== 'running' || sim.targets[0].accel < -1}
+                  onClick={() => { sim.updateTarget(sim.targets[0].id, { accel: -8 }); bump(); }}
+                ><b>{sim.targets[0].accel < -1 ? 'Other car braking' : 'Brake other car'}</b><small>Emergency stop · 8 m/s²</small></button>
+              )}
+              {run !== 'running' && <p className="acs-hint">Available while the scenario is running.</p>}
+            </div>
+            <div className="acs-toggles">
+              <button className={audioUi.enabled ? 'on' : ''} onClick={() => void toggleAudio()} aria-pressed={audioUi.enabled}><Volume2 /> Sound</button>
+              <button className={showRadar ? 'on' : ''} onClick={() => setShowRadar(!showRadar)} aria-pressed={showRadar}><Radar /> Sensors</button>
+            </div>
+          </aside>
+        )}
+        {advanced && <aside className="acs-panel acs-left">
           <Section title="Scenario">
             <p className="acs-note">{scenario.summary}</p>
             <p className="acs-note dim">Expected: {scenario.expectation}</p>
@@ -304,9 +426,7 @@ export function AcousticShield({ onClose }: { onClose: () => void }) {
             <Slider label="Set speed" value={toKmh(sim.egoSetSpeed)} min={0} max={120} step={1} unit="km/h" onChange={(v) => { sim.setEgoSetSpeed(fromKmh(v)); bump(); }} />
             <button
               className={`acs-brake ${sim.egoBraking ? 'on' : ''}`}
-              onPointerDown={() => { sim.setEgoBraking(true); bump(); }}
-              onPointerUp={() => { sim.setEgoBraking(false); bump(); }}
-              onPointerLeave={() => { if (sim.egoBraking) { sim.setEgoBraking(false); bump(); } }}
+              {...holdBrake}
             ><OctagonX /> Hold to brake ({config.egoControl.maxBrakeMps2} m/s²)</button>
           </Section>
 
@@ -353,6 +473,7 @@ export function AcousticShield({ onClose }: { onClose: () => void }) {
             <Slider label="Field of view" value={config.sensor.fovDeg} min={60} max={360} step={10} unit="°" onChange={(v) => setSensor({ fovDeg: v })} />
             <Slider label="Dropout" value={config.sensor.dropoutProbability * 100} min={0} max={80} step={1} unit="%" onChange={(v) => setSensor({ dropoutProbability: v / 100 })} />
             <Slider label="Corrupt samples" value={config.sensor.invalidProbability * 100} min={0} max={30} step={1} unit="%" onChange={(v) => setSensor({ invalidProbability: v / 100 })} />
+            <label className="acs-check"><input type="checkbox" checked={config.sensor.occlusion} onChange={(e) => setSensor({ occlusion: e.target.checked })} /> Buildings block radar (line of sight)</label>
             <label className="acs-check"><input type="checkbox" checked={config.sensor.blackout} onChange={(e) => setSensor({ blackout: e.target.checked })} /> Sensor blackout (stale data)</label>
           </Section>
 
@@ -366,7 +487,7 @@ export function AcousticShield({ onClose }: { onClose: () => void }) {
             <Slider label="Data freshness limit" value={config.decision.maxSensorAgeS * 1000} min={50} max={1000} step={10} unit="ms" onChange={(v) => applyConfig({ ...config, decision: { ...config.decision, maxSensorAgeS: v / 1000 } })} />
             <button className="acs-mini wide" onClick={() => { setNoiseScale(1); applyConfig(cloneConfig(DEFAULT_CONFIG)); }}><RotateCcw /> Restore defaults</button>
           </Section>
-        </aside>
+        </aside>}
 
         <main className="acs-viewport">
           <div ref={viewportRef} className="acs-canvas" />
@@ -374,10 +495,10 @@ export function AcousticShield({ onClose }: { onClose: () => void }) {
             <div className="acs-chip" style={{ borderColor: LEVEL_COLORS[level], color: LEVEL_COLORS[level] }}>{level}</div>
             <div className="acs-clock">t = {sim.time.toFixed(2)} s · {timeScale}× · {run}</div>
           </div>
-          <div className="acs-hud-right">
+          {advanced && <div className="acs-hud-right">
             <label className="acs-check"><input type="checkbox" checked={showRadar} onChange={(e) => setShowRadar(e.target.checked)} /><Radar /> Radar &amp; tracks</label>
             <label className="acs-check"><input type="checkbox" checked={showTruth} onChange={(e) => setShowTruth(e.target.checked)} /> Ground-truth path</label>
-          </div>
+          </div>}
           <div className="acs-readout">
             <div><span>Hyundai</span><b>{fmt(toKmh(sim.ego.speed), 1)}</b><small>km/h</small></div>
             <div><span>TTC</span><b style={{ color: pred?.collision ? LEVEL_COLORS[assess?.level ?? 'NORMAL'] : undefined }}>{pred?.ttc !== null && pred?.ttc !== undefined ? pred.ttc.toFixed(2) : '—'}</b><small>s</small></div>
@@ -397,9 +518,33 @@ export function AcousticShield({ onClose }: { onClose: () => void }) {
           )}
         </main>
 
-        <aside className="acs-panel acs-right">
+        {!advanced && (
+          <aside className="acs-panel acs-right">
+            <div className={`acs-hero is-${protection.state.toLowerCase()}`} style={{ '--lvl': LEVEL_COLORS[level] } as CSSProperties}>
+              <span>{level === 'NORMAL' ? 'All clear' : level}</span>
+              <b>{statusTitle}</b>
+              <strong>{sim.contact ? 'Impact' : pred?.collision && pred.ttc !== null ? <>{pred.ttc.toFixed(1)}<em> s to impact</em></> : <em>No collision predicted</em>}</strong>
+              {sim.contact && (
+                <small>{sim.contact.leadAchievedS !== null ? `Shield was active ${sim.contact.leadAchievedS.toFixed(2)} s before impact` : 'Shield did not activate before impact'}</small>
+              )}
+              {!sim.contact && !active && activation?.endReason && <small>Shield cancelled: {activation.endReason}</small>}
+            </div>
+            <ol className="acs-steps">
+              {STEPS.map((s, i) => (
+                <li key={s.title} className={i === stepIndex ? 'on' : i < stepIndex ? 'done' : ''}>
+                  <i>{i + 1}</i>
+                  <div><b>{s.title}</b><small>{s.text}</small></div>
+                </li>
+              ))}
+            </ol>
+            <Section title="What the shield does">
+              <StapediusIllustration active={active} />
+            </Section>
+          </aside>
+        )}
+        {advanced && <aside className="acs-panel acs-right">
           <Section title="Protection status">
-            <div className={`acs-status ${protection.state.toLowerCase()}`}>
+            <div className={`acs-status is-${protection.state.toLowerCase()}`}>
               <b>{statusTitle}</b>
               <span>{sim.assessment.primary?.reason ?? 'No tracked objects'}</span>
             </div>
@@ -451,12 +596,12 @@ export function AcousticShield({ onClose }: { onClose: () => void }) {
               {events.map((e, i) => <li key={`${e.t}-${i}`} className={e.kind}><time>{e.t.toFixed(2)}</time><span>{e.message}</span></li>)}
             </ol>
           </Section>
-        </aside>
+        </aside>}
       </div>
 
       <footer className="acs-foot">
-        Engineering prototype. Physics, geometry and decision logic run in the browser on simulated sensor data; thresholds are uncalibrated prototype parameters.
-        Not production-ready, not safety-certified, and no vehicle hardware is connected or actuated.
+        {advanced ? <>Engineering prototype. Physics, geometry and decision logic run in the browser on simulated sensor data; thresholds are uncalibrated prototype parameters.
+        Not production-ready, not safety-certified, and no vehicle hardware is connected or actuated.</> : 'Concept simulation on simulated sensor data. Not safety-certified; no vehicle hardware is connected.'}
       </footer>
     </div>
   );
