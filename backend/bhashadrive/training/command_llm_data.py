@@ -255,6 +255,86 @@ A = [
     # Vague: something should change but nothing says what. The answer is no command, so the car asks.
     (["thoda up kar do", "isko kam karo", "kuch karo yaar", "ac ka kuch karo", "isko badal do", "change that",
       "can you fix the setting", "thoda adjust kar do", "wo wala chalao", "zara dekhna", "badal do", "isko up karo"], []),
+    # ---- v2 additions. Appended at the end so the seeded splits of every group above stay exactly as in v1
+    # (data/command_llm/test_v1.jsonl is then still an unseen benchmark for a model trained on this data).
+    # Trip questions: answered from live route data. With a place -> destination; without -> the active route.
+    (["{dest} tak kitna time lagega", "how long to {dest}", "{dest} pahunchne mein kitni der lagegi",
+      "how long will it take to reach {dest}", "{dest} kab tak pahunchenge", "ETA to {dest}", "{dest} tak kitna samay lagega",
+      "when will we reach {dest}", "{dest} jaane mein kitna time lagta hai", "{dest} ku evvalavu neram aagum",
+      "{dest} jete koto shomoy lagbe"],
+     [{"type": "query", "topic": "eta", "destination": "{dest}"}]),
+    (["kitna time aur lagega", "how much longer", "how long will it take", "kab tak pahunchenge", "ETA kya hai",
+      "abhi kitni der aur", "are we there yet", "pahunchne mein kitna time hai", "innum evvalavu neram", "aar koto khon lagbe"],
+     [{"type": "query", "topic": "eta"}]),
+    (["{dest} kitni door hai", "how far is {dest}", "{dest} tak kitne kilometer hain", "distance to {dest}",
+      "{dest} ki doori kitni hai", "{dest} kitna dur hai yahan se", "{dest} evvalavu dooram", "{dest} koto dur"],
+     [{"type": "query", "topic": "distance", "destination": "{dest}"}]),
+    (["kitni door hai abhi", "how far is it", "aur kitna door hai", "how many kilometers left", "kitna raasta baaki hai",
+      "how far are we", "innum evvalavu dooram", "aar koto dur"],
+     [{"type": "query", "topic": "distance"}]),
+    (["{dest} tak toll kitna lagega", "how much toll to {dest}", "{dest} ke raaste mein toll hai kya",
+      "any tolls on the way to {dest}", "{dest} jaane mein toll kitna", "{dest} ku toll evvalavu"],
+     [{"type": "query", "topic": "toll", "destination": "{dest}"}]),
+    (["toll kitna lagega", "how much are the tolls", "raaste mein toll hai kya", "any tolls on this route",
+      "toll ka kharcha kitna hai", "toll plaza kitne hain raaste mein", "toll evvalavu", "toll koto lagbe"],
+     [{"type": "query", "topic": "toll"}]),
+    (["{dest} tak petrol kitne ka lagega", "fuel cost to {dest}", "{dest} jaane mein petrol ka kharcha kitna",
+      "how much petrol money for {dest}", "{dest} tak kitne ka tel jalega"],
+     [{"type": "query", "topic": "fuel_cost", "destination": "{dest}"}]),
+    (["petrol kitne ka lagega", "is trip mein petrol ka kharcha kitna hai", "what will the fuel cost", "kitne ka petrol jalega",
+      "trip ka fuel cost batao", "how much will I spend on petrol", "petrol cost evvalavu aagum", "tel er khoroch koto"],
+     [{"type": "query", "topic": "fuel_cost"}]),
+    # Tanglish / Banglish (Tamil / Bengali + English): the app accepts them, the v1 data had none.
+    (["AC on pannu", "AC podu", "AC on pannunga", "AC chalu koro", "AC ta chalu koro"], [{"type": "climate.power", "on": True}]),
+    (["AC off pannu", "AC off pannunga", "AC bondho koro", "AC ta bondho kore dao"], [{"type": "climate.power", "on": False}]),
+    (["AC konjam kammi pannu", "temperature konjam kurai", "AC ektu komao", "temperature ektu kom koro"],
+     [{"type": "climate.adjustTemp", "delta": -1}]),
+    (["AC konjam athigam pannu", "temperature konjam jaasti pannu", "AC ektu barao", "temperature ektu beshi koro"],
+     [{"type": "climate.adjustTemp", "delta": 1}]),
+    (["romba sudu", "veyil romba irukku", "romba heat ah irukku", "khub gorom lagchhe", "bhishon gorom"],
+     [{"type": "climate.adjustTemp", "delta": -2, "feeling": "hot"}]),
+    (["romba kulir", "kulirudhu", "romba cold ah irukku", "khub thanda lagchhe", "bhishon thanda"],
+     [{"type": "climate.adjustTemp", "delta": 2, "feeling": "cold"}]),
+    (["AC {temp} ku set pannu", "AC {temp} la vai", "AC {temp} koro", "temperature {temp} e set koro"],
+     [{"type": "climate.setTemp", "value": "{temp}"}]),
+    (["volume athigam pannu", "saththam jaasti pannu", "awaj barao", "volume beshi koro"], [{"type": "media.volume", "delta": 4}]),
+    (["volume kammi pannu", "saththam kurai", "awaj komao", "volume kom koro"], [{"type": "media.volume", "delta": -4}]),
+    (["paatu podu", "song podu", "music on pannu", "gaan chalu koro", "gaan chalao na"], [{"type": "media.play", "radio": False}]),
+    (["paatu niruthu", "music stop pannu", "gaan bondho koro", "gaan thamao"], [{"type": "media.pause"}]),
+    (["adutha paatu", "next song podu", "porer gaan", "porer gaan chalao"], [{"type": "media.skip", "dir": 1}]),
+    (["jannal thira", "window open pannu", "janla khule dao", "janla kholo"], [{"type": "window", "target": "driver", "open": 100}]),
+    (["jannal moodu", "window close pannu", "janla bondho koro"], [{"type": "window", "target": "driver", "open": 0}]),
+    (["{color} light podu", "light {color} ah maathu", "light {color} koro", "{color} aalo jalao"],
+     [{"type": "ambient.color", "color": "{color}"}]),
+    (["{dest} ku po", "{dest} ku poganum", "{dest} ku route kaattu", "{dest} niye chalo", "{dest} jabo"],
+     [{"type": "nav.start", "destination": "{dest}"}]),
+    # One verb or one sentence for several commands: joining whole sentences (below) never teaches these.
+    (["AC aur light dono band karo", "turn off the AC and the lights", "AC aur ambient light band kar do",
+      "AC bhi band, light bhi band", "switch off AC and mood lights"],
+     [{"type": "climate.power", "on": False}, {"type": "ambient.power", "on": False}]),
+    (["AC aur music dono chalu karo", "turn on the AC and the music", "AC on karo gaana bhi", "AC chalao aur kuch bajao"],
+     [{"type": "climate.power", "on": True}, {"type": "media.play", "radio": False}]),
+    (["sab windows aur sunroof band karo", "close all windows and the sunroof", "saare sheeshe aur chhat band kar do"],
+     [{"type": "window", "target": "both", "open": 0}, {"type": "sunroof", "open": False}]),
+    (["AC {temp} aur fan {fanlvl}", "AC {temp} pe aur pankha {fanlvl} pe", "set AC to {temp} and fan to {fanlvl}",
+      "temperature {temp}, blower {fanlvl}", "{temp} degree fan {fanlvl}"],
+     [{"type": "climate.setTemp", "value": "{temp}"}, {"type": "climate.fan", "value": "{fanlvl}"}]),
+    (["light {color} aur gaana chalao", "lights {color} and play some music", "{color} light, music on",
+      "ambient {color} karo aur music lagao"],
+     [{"type": "ambient.color", "color": "{color}"}, {"type": "media.play", "radio": False}]),
+    (["music band karo aur navigation bhi band karo", "stop the music and the navigation", "gaana aur map dono band"],
+     [{"type": "media.pause"}, {"type": "nav.stop"}]),
+    (["volume kam karo aur light dim karo", "lower the volume and dim the lights", "awaaz aur roshni dono kam karo"],
+     [{"type": "media.volume", "delta": -4}, {"type": "ambient.brightness", "delta": -0.2}]),
+    (["{dest} le chalo aur batao kitna time lagega", "navigate to {dest} and tell me how long it takes",
+      "{dest} chalo, kitni der lagegi", "take me to {dest}, what's the ETA"],
+     [{"type": "nav.start", "destination": "{dest}"}, {"type": "query", "topic": "eta"}]),
+    (["{dest} kitni door hai aur toll kitna lagega", "how far is {dest} and how much are the tolls",
+      "{dest} ki doori aur toll dono batao"],
+     [{"type": "query", "topic": "distance", "destination": "{dest}"}, {"type": "query", "topic": "toll", "destination": "{dest}"}]),
+    (["kitna time lagega aur petrol kitne ka lagega", "how long will it take and what will the fuel cost",
+      "time aur petrol ka kharcha dono batao"],
+     [{"type": "query", "topic": "eta"}, {"type": "query", "topic": "fuel_cost"}]),
 ]
 
 _MAGNITUDE_SMALL = re.compile(r"\b(thoda|thodi|thode|little|bit|slightly|halka|zara|ek degree)\b", re.I)
@@ -338,7 +418,7 @@ def _lower_first(t: str) -> str:
     return t[0].lower() + t[1:] if len(t) > 1 and t[1].islower() else t
 
 
-def build(seed: int = 7, fills: int = 6, val_frac: float = 0.1, test_frac: float = 0.15, multi: int = 3500) -> dict[str, list]:
+def build(seed: int = 7, fills: int = 6, val_frac: float = 0.1, test_frac: float = 0.15, multi: int = 7000) -> dict[str, list]:
     rng = random.Random(seed)
     out: dict[str, list] = {"train": [], "val": [], "test": []}
     # 1. Hand-written phrasings, split by phrasing so test wordings are unseen.
@@ -361,11 +441,13 @@ def build(seed: int = 7, fills: int = 6, val_frac: float = 0.1, test_frac: float
                 if cmds is not None:
                     out[split].append({"text": row["text"], "intents": cmds, "source": f"nlu_v2:{f}"})
     # 3. Multi-command sentences, joined within a split from single commands of different kinds.
-    joins = [" aur ", " and ", ", ", " and then ", " phir ", " saath hi ", " also ", " aur saath mein "]
+    joins = [" aur ", " and ", ", ", " and then ", " phir ", " saath hi ", " also ", " aur saath mein ",
+             " fir ", " then ", " plus ", " aur fir ", " apram ", " aar ", " tarpor "]
     for split, n in (("train", multi), ("val", multi // 10), ("test", multi // 6)):
         singles = [r for r in out[split] if len(r["intents"]) == 1]
         for _ in range(n):
-            k = 3 if rng.random() < 0.25 else 2
+            u = rng.random()
+            k = 4 if u < 0.05 else 3 if u < 0.35 else 2
             parts = rng.sample(singles, k)
             if len({p["intents"][0]["type"] for p in parts}) < k:
                 continue
@@ -379,6 +461,13 @@ def build(seed: int = 7, fills: int = 6, val_frac: float = 0.1, test_frac: float
 
 def main() -> int:
     data = build()
+    # A sentence in any test set (this build's, or the kept v1 benchmark test_v1.jsonl) never trains the model:
+    # data/nlu_v2 was regrouped after v1, so some v1 test sentences now fall in its train split.
+    v1 = OUT / "test_v1.jsonl"
+    held = {r["text"] for r in data["test"]} | (
+        {json.loads(l)["text"] for l in v1.read_text(encoding="utf-8").splitlines()} if v1.is_file() else set())
+    for split in ("train", "val"):
+        data[split] = [r for r in data[split] if r["text"] not in held]
     OUT.mkdir(parents=True, exist_ok=True)
     for split, rows in data.items():
         bad = [r for r in rows for c in r["intents"] if not valid(c)]

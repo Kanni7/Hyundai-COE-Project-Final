@@ -28,7 +28,6 @@ RUN pip install --no-cache-dir -e .
 # high-speed Free Tier Cloud APIs (Groq Whisper, Groq Qwen 3.8, Sarvam Saaras & Bulbul).
 ENV BD_API_HOST=0.0.0.0
 ENV BD_CLOUD_ONLY=true
-ENV BD_HYBRID_CLOUD_ASR=true
 ENV BD_DEV_DEFAULT_TIER=premium
 ENV BD_DEV_TIER_SWITCH=true
 ENV BD_NLU_ARTIFACTS=artifacts/nlu/runtime

@@ -1,13 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Armchair, Car, ChevronDown, Ear, Fingerprint, Gauge, Languages, Monitor, Play, Plus, ScanFace, ShieldAlert, Sparkles, Square, Trash2 } from 'lucide-react';
-import type { CarState, ChatMessage, Intent, ProfileId, Toast } from './types';
+import type { CarState, ChatMessage, Intent, Lang, ProfileId, RouteFailure, RouteInfo, Toast } from './types';
 import { SCENES } from './scenes';
 import { getTimeGreeting, initialCar, runIntents } from './state/car';
 import { parseCommand, type NluContext, type ParseResult } from './nlu/parser';
 import { carAudio } from './lib/audio';
 import { engine } from './lib/engine';
 import { speak, useSpeechRecognition } from './lib/speech';
-import { ApiError, BACKEND_DOMAIN, backend, recordAudio, toIntent, type BackendHealth, type Entitlement, type SpeakerStatus, type Transcription, type WindSettings, type WindTestResult } from './lib/backend';
+import { ApiError, BACKEND_DOMAIN, backend, fetchRoute, recordAudio, toIntent, type BackendHealth, type Entitlement, type SpeakerStatus, type Transcription, type WindSettings, type WindTestResult } from './lib/backend';
 import { suggestionsFor } from './lib/intents';
 import { Cockpit, type CockpitView } from './components/Cockpit';
 import type { VoicePhase } from './components/Infotainment';
@@ -56,7 +56,7 @@ interface Routed {
   intents: Intent[];
   /** Backend reply for turns that change nothing (questions, refusals, saved shortcuts). */
   say?: string;
-  engine: 'backend' | 'local' | 'llm' | 'cloud';
+  engine: 'backend' | 'local' | 'llm' | 'cloud' | 'assistant';
   awaitingConfirm?: boolean;
 }
 
@@ -95,6 +95,17 @@ function bestTranscript(t: Transcription, ctx: NluContext): string {
   return read.reduce((best, r) => (better(r, best) ? r : best), read[0]).h.trim();
 }
 
+const ROUTE_TOPICS = new Set(['eta', 'distance', 'toll', 'fuel_cost']);
+
+/** The place a command needs route data for: a destination being started or asked about, else the active route. */
+function routeDestination(intents: Intent[], car: CarState): string | undefined {
+  const start = intents.find((i) => i.type === 'nav.start');
+  const ask = intents.find((i) => i.type === 'query' && ROUTE_TOPICS.has(i.topic));
+  if (!start && !ask) return undefined;
+  return (ask?.type === 'query' ? ask.destination : undefined) ?? (start?.type === 'nav.start' ? start.destination : undefined)
+    ?? car.nav?.destination;
+}
+
 async function route(text: string, parsed: ParseResult, server: BackendHealth | null, car?: CarState): Promise<Routed> {
   const teach = parseTeachUtterance(text);
   if (teach && car) {
@@ -120,16 +131,17 @@ async function route(text: string, parsed: ParseResult, server: BackendHealth | 
   }
   const local = parsed.intents;
   const localOnly = local.length > 1 || local.some((i) => !BACKEND_DOMAIN.has(i.type));
-  if (!server || (localOnly && !parsed.unparsed.length)) return { intents: local, engine: 'local' };
+  if (!server || (localOnly && !parsed.unparsed.length && local.length >= parsed.clauses)) return { intents: local, engine: 'local' };
   const llm = async () => (server.llm_ready ? (await backend.interpret(text).catch(() => null))?.intents ?? [] : []);
 
-  // Several clauses, some not understood ("AC 22 kar do aur mahaul romantic bana do"): the LLM reads the
-  // whole sentence. On the test set this beat both the parser's partial reading and LLM-on-the-unread-clauses-
-  // only (53.6% vs 47.9% on multi-command sentences): a clause cut out of its sentence loses its meaning.
+  // Several clauses ("AC 22 kar do aur mahaul romantic bana do, phir Juhu le chalo"): the command LLM reads the
+  // whole sentence (a clause cut out of its sentence loses its meaning) and wins when it found at least as many
+  // commands as the parser. The backend's /text answers one command only, so it never sees these.
   // A single vague clause ("AC ka kuch karo") goes to the backend instead, which asks what was meant.
-  if (local.length && parsed.unparsed.length && parsed.clauses > 1) {
+  if (parsed.clauses > 1 && (parsed.unparsed.length || local.length < parsed.clauses)) {
     const intents = await llm();
-    return intents.length ? { intents, engine: 'llm' } : { intents: local, engine: 'local' };
+    if (intents.length && intents.length >= local.length) return { intents, engine: 'llm' };
+    if (local.length) return { intents: local, engine: 'local' };
   }
 
   const res = await backend.text(text);
@@ -150,6 +162,12 @@ async function route(text: string, parsed: ParseResult, server: BackendHealth | 
   }
   if (res.decision === 'reject' && res.reason_code === 'unsupported_request' && local.length) {
     return { intents: local, engine: 'local' };
+  }
+  // Not a car command ("who invented the car?", "service kab karwani chahiye?"): the on-device assistant
+  // (Gemma 3 1B) answers. No assistant pack installed: the backend's reply below.
+  if (unsure) {
+    const a = await backend.localAsk(text, car ? snapshot(car) : {}).catch(() => null);
+    if (a?.answer) return { intents: [], say: a.answer, engine: 'assistant' };
   }
   return {
     intents: [],
@@ -207,6 +225,8 @@ export default function App() {
   const serverRef = useRef(server);
   useEffect(() => { serverRef.current = server; }, [server]);
   const awaitingConfirm = useRef(false);
+  /** Language of the last voice command (from speech recognition); null for typed commands. */
+  const spokenLang = useRef<string | null>(null);
   // Opens the mic (if closed) for the answer to a question the car just asked; set once the mic exists.
   const listenForAnswer = useRef<() => void>(() => {});
   // BhashaDrive's own recogniser when the backend has one; the browser's otherwise.
@@ -278,6 +298,7 @@ export default function App() {
   /** `speaker`: the driver profile the backend recognised from the voice, switched to before the command runs. */
   const handleCommand = useCallback((text: string, via: ChatMessage['via'], speaker?: ProfileId) => {
     carAudio.unlock();
+    if (via !== 'voice') spokenLang.current = null;
     setMessages((m) => [...m, { id: nextId++, role: 'user', text, via }]);
     setHeard({ text, via: via ?? 'text' });
     setPhase('thinking');
@@ -328,7 +349,7 @@ export default function App() {
     nlu.current = parsed.context;
     const online = serverRef.current !== null;
 
-    const finish = ({ intents, say, engine: via, awaitingConfirm: awaiting }: Routed) => {
+    const complete = ({ intents, say, engine: via, awaitingConfirm: awaiting }: Routed, route?: RouteInfo | RouteFailure) => {
       awaitingConfirm.current = !!awaiting;
       let toExecute = intents;
       let shortcutToast: Toast | undefined;
@@ -357,10 +378,15 @@ export default function App() {
         toExecute = [];
       }
 
-      const ran = toExecute.length ? runIntents(carRef.current, toExecute, parsed.lang, { speed: engine.speed }) : null;
+      // Speech arrives in English (cloud translation); reply in the language spoken where the cockpit has
+      // templates (hi/ta/bn), else in English.
+      const spoken = spokenLang.current;
+      const replyLang: Lang = spoken === 'hi' || spoken === 'ta' || spoken === 'bn' ? spoken : parsed.lang;
+      const ran = toExecute.length ? runIntents(carRef.current, toExecute, replyLang, { speed: engine.speed, route }) : null;
       const out = {
         state: ran ? ran.state : carRef.current,
-        text: (say || (ran ? ran.text : "Sorry, I didn't catch that.")),
+        // Route answers come from map data; an LLM's spoken_response must not replace them with its own numbers.
+        text: (route && ran ? ran.text : say || (ran ? ran.text : "Sorry, I didn't catch that.")),
         toast: shortcutToast || (ran ? ran.toast : undefined),
         understood: ran ? ran.understood : (say ? true : false),
       };
@@ -368,22 +394,33 @@ export default function App() {
       commit(out.state);
       if (out.state.ignition === 'on' && intents.some((i) => i.type === 'rev')) engine.blip(1300);
       if (out.toast) setToast({ ...out.toast, id: nextId++ });
-      setMessages((m) => [...m, { id: nextId++, role: 'car', text: out.text, intents, engine: online ? via : undefined }]);
-      // The car asked something ("Should I...?", "Did you mean...?"): open the mic for the answer.
-      const asks = !!awaiting || /\?\s*$/.test(say ?? '');
-      setReply({ text: out.text, intents, understood: out.understood, asks, confirm: !!awaiting });
-      carAudio.chime(out.understood ? 'ok' : 'error');
-      const answerBack = () => { if (asks) window.setTimeout(() => listenForAnswer.current(), 300); }; // let the speaker fall silent
-      if (ttsRef.current && 'speechSynthesis' in window) {
-        speak(out.text,
-          () => { setPhase('speaking'); carAudio.duck(true); },
-          () => { setPhase('idle'); carAudio.duck(false); answerBack(); });
-        // Some browsers never fire onstart without voices; don't get stuck.
-        window.setTimeout(() => setPhase((p) => (p === 'thinking' ? 'idle' : p)), 1500);
-      } else {
-        setPhase('idle');
-        answerBack();
-      }
+      const deliver = (text: string) => {
+        setMessages((m) => [...m, { id: nextId++, role: 'car', text, intents, engine: online ? via : undefined }]);
+        // The car asked something ("Should I...?", "Did you mean...?"): open the mic for the answer.
+        const asks = !!awaiting || /\?\s*$/.test(say ?? '');
+        setReply({ text, intents, understood: out.understood, asks, confirm: !!awaiting });
+        carAudio.chime(out.understood ? 'ok' : 'error');
+        const answerBack = () => { if (asks) window.setTimeout(() => listenForAnswer.current(), 300); }; // let the speaker fall silent
+        if (ttsRef.current && 'speechSynthesis' in window) {
+          speak(text,
+            () => { setPhase('speaking'); carAudio.duck(true); },
+            () => { setPhase('idle'); carAudio.duck(false); answerBack(); });
+          // Some browsers never fire onstart without voices; don't get stuck.
+          window.setTimeout(() => setPhase((p) => (p === 'thinking' ? 'idle' : p)), 1500);
+        } else {
+          setPhase('idle');
+          answerBack();
+        }
+      };
+      deliver(out.text);
+    };
+
+    // Starting navigation or a trip question ("kitna time lagega", "toll kitna hai"): fetch the live route first.
+    const finish = (routed: Routed) => {
+      const dest = routeDestination(routed.intents, carRef.current);
+      if (!dest) { complete(routed); return; }
+      void (serverRef.current ? fetchRoute(dest) : Promise.resolve<RouteFailure>({ error: 'the maps service needs the backend', code: 'offline' }))
+        .then((route) => complete(routed, route));
     };
 
     const matched = matchShortcut(carRef.current.profile, text);
@@ -403,7 +440,8 @@ export default function App() {
       ? routePremium(text, parsed, serverRef.current, carRef.current)
       : route(text, parsed, serverRef.current, carRef.current))
       .catch((): Routed => {
-        setServer(null); // backend went away: carry on with the local parser
+        // One failed call is not proof the backend went away (clearing it also drops server speech recognition).
+        void backend.health().then(setServer, () => setServer(null));
         return { intents: parsed.intents, engine: 'local' };
       })
       // Typed commands get a short "thinking" beat; spoken ones already waited for speech recognition.
@@ -422,8 +460,9 @@ export default function App() {
         }).catch(() => setWindSettings(null));
         void backend.entitlement().then((e) => {
           setEntitlement(e);
-          if (first && e.configured && e.tier === 'free' && e.dev_tier_switch) {
-            void backend.setDevTier('premium').then(setEntitlement).catch(() => {});
+          // On-device AI only by default (no cloud LLM): Premium stays an explicit choice in Settings.
+          if (first && e.tier === 'premium' && e.dev_tier_switch) {
+            void backend.setDevTier('free').then(setEntitlement).catch(() => {});
           }
         }, () => setEntitlement(null));
         if (first) { first = false; void backend.reset().catch(() => {}); }
@@ -527,7 +566,8 @@ export default function App() {
     if (recording) { void recording.stop(); return; } // the `done` handler below transcribes
     try {
       setAsrError(null);
-      const r = await recordAudio(8000, 900, { noiseSuppression: browserNoiseSuppression, autoGainControl });
+      // Long multi-command sentences: up to 20 s (the cloud ASR limit), and a 1.6 s pause, not 0.9 s, ends them.
+      const r = await recordAudio(20000, 1600, { noiseSuppression: browserNoiseSuppression, autoGainControl });
       setRecording(r);
       // Ends on the mic button, on a pause after speech, or at the length limit.
       void r.done.then(async (audio) => {
@@ -555,6 +595,7 @@ export default function App() {
         try {
           const t = await backend.transcribe(audio);
           console.log('[Voice Command] Transcribe result:', t);
+          spokenLang.current = t.language ?? null;
           if (t.text.trim()) handleCommand(bestTranscript(t, nlu.current), 'voice', t.speaker?.profile);
           else { setPhase('idle'); setAsrError(t.error ?? 'No speech heard. Try again.'); }
         } catch {
@@ -647,16 +688,21 @@ export default function App() {
     }
   }, [profiles, refreshSpeakers, browserNoiseSuppression, autoGainControl]);
 
-  // Chrome's recogniser streams audio to Google; when that fails ("network"), carry on with the
-  // backend's Whisper for the rest of the session and keep listening, so the driver need not repeat the tap.
+  // The browser recogniser is only the no-backend fallback, and it streams audio to Google; when that fails
+  // ("network"), ask the backend now (the cached health can be stale) and keep listening with server speech
+  // recognition, so the driver need not repeat the tap.
   useEffect(() => {
     speechFailed.current = (code) => {
-      if ((code !== 'network' && code !== 'service-not-allowed') || !serverAsr) return false;
-      setAsrMode('server');
-      if (!recording) void toggleServerMic();
+      if (code !== 'network' && code !== 'service-not-allowed') return false;
+      void backend.health().then((h) => {
+        setServer(h);
+        if (!h.asr_ready) { setAsrError('Speech recognition is not available. Type the command instead.'); return; }
+        setAsrMode('server');
+        if (!recording) void toggleServerMic();
+      }, () => setAsrError('The backend is not reachable for speech recognition. Type the command instead.'));
       return true;
     };
-  }, [serverAsr, recording, toggleServerMic]);
+  }, [recording, toggleServerMic]);
 
   const toggleMic = useCallback(() => {
     carAudio.unlock();
@@ -980,7 +1026,7 @@ export default function App() {
         onProfileCreated={(np) => handleIntent({ type: 'profile', id: np.id })}
       />
 
-      <VoiceDock phase={livePhase} interim={speech.interim} heard={heard} reply={reply} error={speech.error ?? asrError}
+      <VoiceDock phase={livePhase} interim={speech.interim} heard={heard} reply={reply} error={(useServerAsr ? null : speech.error) ?? asrError}
         suggestions={[...getShortcuts(car.profile).map((s) => s.trigger), ...suggestionsFor(reply?.intents ?? [], !!reply?.confirm)]} supported={micSupported}
         onMic={toggleMic} onSend={handleCommand} />
     </div>

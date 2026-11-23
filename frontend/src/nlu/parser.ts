@@ -2,7 +2,7 @@
 // Runs fully offline. Swap `parseCommand` for an LLM call later; the Intent
 // contract in types.ts stays the same.
 
-import type { AmbientColor, AmbientMode, Genre, Intent, Lang, Mood, Page, ProfileId, Zone } from '../types';
+import type { AmbientColor, AmbientMode, Genre, Intent, Lang, Mood, Page, ProfileId, RouteTopic, Zone } from '../types';
 
 import { getProfiles, type Profile } from '../lib/profiles';
 
@@ -388,6 +388,38 @@ function extractDestination(c: Clause): string | undefined {
   return words.length ? titleCase(words.join(' ')) : undefined;
 }
 
+const TRIP = {
+  eta: ['how long', 'how much time', 'kitna time', 'kitna samay', 'kitni der', 'kitne der', 'eta', 'kab pahunch', 'kab tak pahunch',
+    'when will we reach', 'when will i reach', 'arrival time', 'कितना समय', 'कितना टाइम', 'कितनी देर', 'कब पहुंच', 'कब पहुँच'],
+  distance: ['how far', 'kitni door', 'kitna door', 'kitni dur', 'kitna dur', 'distance', 'doori', 'कितनी दूर', 'कितना दूर', 'दूरी'],
+  toll: ['toll', 'tolls', 'टोल'],
+  fuelCost: ['fuel cost', 'trip cost', 'petrol cost', 'petrol ka kharcha'],
+  cost: ['cost', 'kharcha', 'kharch', 'kitne ka', 'kitne paise', 'paise', 'rupees', 'rupaye', 'खर्चा', 'खर्च', 'कितने का'],
+};
+// Words around a trip question that are never part of the place name.
+const TRIP_STOP = new Set([...Object.values(TRIP).flat().flatMap((w) => w.split(' ')), ...W.question.flatMap((w) => w.split(' ')),
+  ...W.fuel, 'it', 'will', 'take', 'me', 'i', 'we', 'us', 'there', 'reach', 'the', 'is', 'are', 'be', 'get', 'going', 'from', 'here',
+  'lagega', 'lagegi', 'lagenge', 'hoga', 'hogi', 'hai', 'se', 'yahan', 'wahan', 'pe', 'mein', 'ka', 'ki', 'ke', 'and', 'aur',
+  'हैं', 'है', 'लगेगा', 'लगेगी', 'से', 'यहाँ', 'वहाँ', 'का', 'की', 'के']);
+
+/** The place in a trip question: the words before "tak" ("Juhu Beach tak kitna time") or after "to"
+ * ("how long to Juhu Beach"); none means the active route. */
+function tripDestination(c: Clause): string | undefined {
+  const t = c.tokens;
+  const tak = t.findIndex((w) => w === 'tak' || w === 'तक');
+  let words: string[] = [];
+  if (tak > 0) {
+    let i = tak - 1;
+    while (i >= 0 && !TRIP_STOP.has(t[i]) && !FILLER.has(t[i])) i -= 1;
+    words = t.slice(i + 1, tak);
+  } else {
+    const to = t.findIndex((w) => w === 'to' || w === 'till' || w === 'until');
+    if (to >= 0) words = t.slice(to + 1).filter((w) => !TRIP_STOP.has(w) && !FILLER.has(w));
+  }
+  for (const [keys, label] of PLACES) if (words.length && keys.some((k) => words.join(' ').includes(k))) return label;
+  return words.length ? titleCase(words.join(' ')) : undefined;
+}
+
 function extractContact(c: Clause): string | undefined {
   for (const [keys, label] of CONTACTS) if (c.has(keys)) return label;
   const trigger = new Set([...W.callTrigger, 'karo', 'kar', 'lagao', 'milao', 'to', 'please', 'give', 'a']);
@@ -429,6 +461,14 @@ function parseClause(c: Clause, ctx: NluContext): { intents: Intent[]; domain?: 
   const up = c.has(W.up);
   const down = c.has(W.down);
   const isQuestion = c.has(W.question) && !c.has(['karo', 'kar', 'kardo', 'करो', 'set']);
+
+  // Trip questions, answered from live route data ("Juhu tak kitna time lagega", "how far is it", "toll kitna hai")
+  const routeTopic: RouteTopic | undefined = c.has(TRIP.eta) ? 'eta' : c.has(TRIP.distance) ? 'distance' : c.has(TRIP.toll) ? 'toll'
+    : c.has(TRIP.fuelCost) || (c.has(W.fuel) && c.has(TRIP.cost)) ? 'fuel_cost' : undefined;
+  if (routeTopic) {
+    const destination = tripDestination(c);
+    return { intents: [destination ? { type: 'query', topic: routeTopic, destination } : { type: 'query', topic: routeTopic }] };
+  }
 
   // Questions about the car
   if (isQuestion) {

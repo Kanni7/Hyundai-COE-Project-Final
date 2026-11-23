@@ -21,6 +21,11 @@ from ..assistant.api import assistant_router
 from ..assistant.entitlements import Entitlements
 from ..assistant.service import AssistantService
 from ..bharat.api import BharatServices, bharat_router
+from ..nav.routes import RouteService, nav_router
+from ..audio.cloud_asr import CloudASR
+from ..bharat.languages import detected
+from ..local_ai.assistant import LocalAssistant, local_ai_router
+from ..local_ai.packs import PackManager, packs_router
 from ..config import FRONTEND_DIST, AppConfig
 
 STATIC = Path(__file__).with_name("static")
@@ -31,10 +36,6 @@ class TextIn(BaseModel):
     text: str = Field(max_length=500)
 
 
-class ConnectivityIn(BaseModel):
-    offline: bool
-
-
 class WindSettingsIn(BaseModel):
     enabled: bool = True
     strength: float = Field(default=0.75, ge=0.0, le=1.0)
@@ -43,7 +44,7 @@ class WindSettingsIn(BaseModel):
 
 def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = False, mock: bool = False,
                frontend_dir: Path | None = FRONTEND_DIST, command_llm=None, bharat=None, speaker=None,
-               assistant=None, entitlements=None) -> FastAPI:
+               assistant=None, entitlements=None, nav=None, packs=None) -> FastAPI:
     config = config or AppConfig()
     cloud_mode = (
         mock
@@ -81,11 +82,10 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
                 print(f"[NOTE] Command LLM unavailable: {e}")
     if pipeline is None:
         if cloud_mode:
-            from ..audio.hybrid_asr import HybridASR
             from ..tests.fakes_v2 import make_pipeline
 
             pipeline = make_pipeline()
-            pipeline.asr = HybridASR(config)
+            pipeline.asr = CloudASR(config)
             print("[OK] Cloud-optimized API pipeline initialized (<70MB RAM).")
         elif mock:
             from ..audio.asr import MockASR
@@ -109,18 +109,16 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
                 from ..tests.fakes_v2 import make_pipeline
 
                 pipeline = make_pipeline()
-                try:
-                    from ..audio.hybrid_asr import HybridASR
-                    pipeline.asr = HybridASR(config)
-                    print(f"[OK] HybridASR initialized: {pipeline.asr.name}")
-                except Exception as asr_err:
-                    print(f"[NOTE] HybridASR init error: {asr_err}")
-                    pipeline.asr = None
+                pipeline.asr = CloudASR(config)
     is_v2 = hasattr(pipeline, "model")
     lock = threading.Lock()  # one conversation, processed sequentially
     wind_settings = default_wind_settings()
     if pipeline.asr is not None:
         pipeline.asr.set_wind_settings(wind_settings)
+    packs = packs or PackManager(config.runtime.root / "models")
+    local_ai = LocalAssistant(packs)
+    if isinstance(pipeline.asr, CloudASR):  # offline: the driver's language pack, translated by the local assistant
+        pipeline.asr.packs, pipeline.asr.assistant = packs, local_ai
     app = FastAPI(title="BhashaDrive (local prototype)", docs_url="/docs")
     from fastapi.middleware.cors import CORSMiddleware
     app.add_middleware(
@@ -264,8 +262,8 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
             return None
 
     def _local_transcribe(p: Path) -> tuple[str, str | None]:
-        """The on-device recogniser only (premium fallback): never a cloud engine."""
-        asr = getattr(pipeline.asr, "_local_asr", None) or pipeline.asr
+        """Premium fallback: the free tier's recogniser (the same cloud ASR, a second attempt)."""
+        asr = pipeline.asr
         if asr is None:
             return "", None
         with lock:
@@ -293,10 +291,12 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
                 if asr_text:
                     who = _identify(p)
         text = ranked[0] if ranked else ""
-        name = getattr(getattr(asr, "_local_asr", None) or asr, "name", None)
+        name = getattr(asr, "name", None)
         print(f"[API /transcribe] {name} {res.latency_s}s status={res.status} asr={res.hypotheses or [asr_text]} -> refined={ranked}")
         return {"text": text, "hypotheses": ranked, "asr_text": asr_text, "asr_hypotheses": res.hypotheses,
-                "status": res.status, "error": res.error, "engine": name, "speaker": who}
+                "status": res.status, "error": res.error, "engine": name, "speaker": who,
+                # the spoken language (our code, e.g. "ta"): the cockpit replies in it
+                "language": (detected(res.language).code if detected(res.language) else None)}
 
     def _profile(profile: str) -> str:
         if not profile or len(profile) > 40:
@@ -375,19 +375,6 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
         return [{"id": c.id, "trigger": c.trigger, "phrases": c.phrases, "action": c.action.model_dump(mode="json"),
                  "updated_at": c.updated_at} for c in pipeline.store.list_commands(pipeline.profile_id)]
 
-    @api.get("/connectivity")
-    def get_connectivity():
-        if hasattr(pipeline.asr, "get_status"):
-            return pipeline.asr.get_status()
-        return {"is_offline": False, "active_engine": getattr(pipeline.asr, "name", "unknown")}
-
-    @api.post("/connectivity")
-    def set_connectivity(body: ConnectivityIn):
-        if hasattr(pipeline.asr, "set_offline_mode"):
-            pipeline.asr.set_offline_mode(body.offline)
-            return pipeline.asr.get_status()
-        return {"is_offline": body.offline, "note": "ASR engine does not support dynamic toggle"}
-
     @api.post("/reset")
     def reset():
         if is_v2:
@@ -399,6 +386,9 @@ def create_app(config: AppConfig | None = None, pipeline=None, legacy: bool = Fa
         return {"ok": True}
 
     api.include_router(bharat_router(bharat))
+    api.include_router(nav_router(nav or RouteService(config.nav)))
+    api.include_router(packs_router(packs))
+    api.include_router(local_ai_router(local_ai))
     assistant = assistant or AssistantService(config.assistant)
     if assistant.problems and config.assistant.dev_tier_switch:
         print(f"[NOTE] Premium voice disabled until configured: {', '.join(assistant.problems)}")

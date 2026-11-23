@@ -101,6 +101,17 @@ class BharatConfig:
 
 
 @dataclass
+class NavConfig:
+    """Route questions (ETA, distance, tolls, fuel cost): Google Routes API. The key stays on the server."""
+
+    google_maps_api_key: str | None = field(default_factory=lambda: os.environ.get("GOOGLE_MAPS_API_KEY") or None)
+    timeout_s: float = field(default_factory=lambda: _env_float("BD_NAV_TIMEOUT_S", 6.0))
+    # Fuel cost = distance / mileage x price. Petrol prices differ by city and change: set your own.
+    fuel_price_inr_per_l: float = field(default_factory=lambda: _env_float("BD_FUEL_PRICE_INR_PER_L", 103.0))
+    mileage_kmpl: float = field(default_factory=lambda: _env_float("BD_FUEL_KMPL", 18.0))
+
+
+@dataclass
 class AssistantConfig:
     """Premium voice assistant: Sarvam Saaras ASR -> OpenAI LLM. Keys are read from the server environment only."""
 
@@ -109,6 +120,9 @@ class AssistantConfig:
     sarvam_model: str = field(default_factory=lambda: _env("BD_SARVAM_STT_MODEL", "saaras:v4"))
     # codemix: English words in Latin script, Indic words in native script (Hinglish / Tanglish).
     sarvam_mode: str = field(default_factory=lambda: _env("BD_SARVAM_STT_MODE", "codemix"))
+    # In-car speech: "translate" turns any of the 22 languages straight into English, the language the on-device
+    # command and assistant models read best (Sarvam still reports which language was spoken).
+    sarvam_incar_mode: str = field(default_factory=lambda: _env("BD_SARVAM_INCAR_MODE", "translate"))
     # "unknown" = auto-detect; or a BCP-47 code such as hi-IN, ta-IN, en-IN.
     sarvam_language: str = field(default_factory=lambda: _env("BD_SARVAM_STT_LANGUAGE", "unknown"))
     sarvam_timeout_s: float = field(default_factory=lambda: _env_float("BD_SARVAM_TIMEOUT_S", 8.0))
@@ -225,7 +239,7 @@ class SherpaASRConfig:
         x.strip() for x in _env("BD_SHERPA_LANGUAGES", "hi,en").split(",") if x.strip()))
     threads: int = field(default_factory=lambda: _env_int("BD_ASR_THREADS", 4))
     timeout_s: float = field(default_factory=lambda: _env_float("BD_ASR_TIMEOUT_S", 10.0))
-    max_audio_s: float = field(default_factory=lambda: _env_float("BD_MAX_AUDIO_S", 15.0))
+    max_audio_s: float = field(default_factory=lambda: _env_float("BD_MAX_AUDIO_S", 20.0))  # long multi-command sentences
     min_rms: float = field(default_factory=lambda: _env_float("BD_ASR_MIN_RMS", 0.01))
 
 
@@ -252,6 +266,7 @@ class AppConfig:
     bharat: BharatConfig = field(default_factory=BharatConfig)
     speaker: SpeakerIDConfig = field(default_factory=SpeakerIDConfig)
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
+    nav: NavConfig = field(default_factory=NavConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     limits: VehicleLimits = field(default_factory=VehicleLimits)
     context: ContextConfig = field(default_factory=ContextConfig)

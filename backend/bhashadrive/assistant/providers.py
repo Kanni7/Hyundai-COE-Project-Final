@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 import time
 from dataclasses import dataclass
 
@@ -22,6 +23,47 @@ KEYTERMS = ["AC", "Verna", "ambient light", "mood lighting", "defrost", "sunroof
             "volume", "petrol pump", "navigation", "cruise control", "lane keep", "hazard lights", "wiper",
             "drive mode", "sport mode", "eco mode", "seat ventilation", "BharatConnect", "konjam", "kammi",
             "jaasti", "pannu", "thoda", "kam karo", "badha do", "band karo", "chalu karo", "gaana"]
+
+
+class IPv4First(httpx.BaseTransport):
+    """httpx has no Happy Eyeballs: where DNS returns an IPv6/NAT64 address whose path is broken, every new
+    connection hangs ~40 s before IPv4 is tried (measured on the dev network). Connect over IPv4 first; fall
+    back to the system's choice only when IPv4 cannot connect (an IPv6-only network)."""
+
+    # The pool lives in the transport: a Client's `limits` are ignored once a transport is passed in. httpx's
+    # default 5 s keep-alive reconnected (TCP + TLS, ~0.4 s) for almost every command. Sarvam drops a connection
+    # idle for 40-70 s (measured), so expire it first; SarvamASR.keep_warm stops it ever going that idle.
+    LIMITS = httpx.Limits(max_keepalive_connections=1, keepalive_expiry=50)
+
+    def __init__(self, v4: httpx.BaseTransport | None = None, fallback: httpx.BaseTransport | None = None):
+        self.v4 = v4 or httpx.HTTPTransport(local_address="0.0.0.0", limits=self.LIMITS)
+        self.fallback = fallback or httpx.HTTPTransport(limits=self.LIMITS)
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        try:
+            return self.v4.handle_request(request)
+        except httpx.ConnectError:  # nothing was sent yet, so retrying the request is safe
+            return self.fallback.handle_request(request)
+        except httpx.RemoteProtocolError:  # kept-alive connection closed by the server without answering: once more on a new one
+            return self.v4.handle_request(request)
+
+    def close(self) -> None:
+        self.v4.close()
+        self.fallback.close()
+
+
+_sarvam_client: httpx.Client | None = None
+_sarvam_lock = threading.Lock()
+
+
+def sarvam_client() -> httpx.Client:
+    """The process's one Sarvam client: the in-car ASR, the premium assistant and BharatConnect share its
+    kept-alive connection instead of each opening their own."""
+    global _sarvam_client
+    with _sarvam_lock:
+        if _sarvam_client is None:
+            _sarvam_client = httpx.Client(transport=IPv4First())
+        return _sarvam_client
 
 
 @dataclass
@@ -93,7 +135,19 @@ class SarvamASR:
 
     def __init__(self, config: AssistantConfig, client: httpx.Client | None = None):
         self.config = config
-        self.client = client or httpx.Client()
+        self.client = client or sarvam_client()
+
+    def keep_warm(self, every_s: float = 30.0) -> None:
+        """Open the connection now and touch it every `every_s` (in the background), so commands never wait for
+        TCP + TLS setup. A bare GET: no audio, not billed (405), ~1 MB of data a day."""
+        def run():
+            while True:
+                try:
+                    self.client.get(self.config.sarvam_url, timeout=self.config.sarvam_timeout_s)
+                except httpx.HTTPError:
+                    pass  # offline: the next command connects (or falls back) as usual
+                time.sleep(every_s)
+        threading.Thread(target=run, daemon=True, name="sarvam-keep-warm").start()
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language_code: str | None = None) -> Transcript:
         import soundfile as sf
@@ -196,6 +250,7 @@ Language understanding conventions:
 - Confirmations (yes): "haan", "yes", "seri", "aamaa", "kar do", "hyan", "thik achhe".
 - Cancellations (no): "nahi", "no", "vendaam", "mat karo", "na", "dorkar nei".
 - "Home screen" is screen(page "home"). Navigation destinations are plain place names ("nearest petrol pump"). At most {MAX_COMMANDS} commands.
+- Trip questions: "kitna time lagega / how long / ETA" = query topic "eta"; "kitni door / how far" = "distance"; "toll kitna / tolls" = "toll"; "petrol kitne ka lagega / fuel cost" = "fuel_cost". Put the place in destination when named, else null (the active route). Several questions = several query actions. NEVER state times, distances or prices in spoken_response: the car answers from live map data.
 
 Custom commands & shortcuts (macro creation):
 - When the driver wants to teach or save a custom voice command / shortcut (e.g. "Whenever I say chill mode, set the AC to 20 degrees and set the ambient light to blue", "When I say X, do Y and Z", "Jab bhi main chill mode bolun to AC 20 pe kar do aur light blue kar do"):

@@ -25,3 +25,4 @@ reports/_asr_items.json
 # premium tier: usage logs and subscription tokens are never committed
 data/usage/
 data/entitlements.json
+.venv-train/

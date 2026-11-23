@@ -365,15 +365,8 @@ def build_v2_pipeline(config: AppConfig | None = None, with_asr: bool = True, wi
     model = IntentModel.load(rt.root / rt.nlu_artifacts, rt.root, threads=rt.nlu_threads)
     asr = None
     if with_asr:
-        try:
-            from .audio.hybrid_asr import HybridASR
-            asr = HybridASR(config)
-        except Exception:
-            try:
-                from .audio.sherpa_asr import SherpaWhisperASR
-                asr = SherpaWhisperASR(config.sherpa)
-            except Exception:
-                asr = None
+        from .audio.cloud_asr import CloudASR
+        asr = CloudASR(config)
     store = matcher = None
     if with_personalization:
         store = PersonalCommandStore(db_path or rt.root / rt.profile_db, store_correction_history=rt.store_corrections)
