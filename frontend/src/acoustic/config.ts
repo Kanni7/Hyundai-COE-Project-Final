@@ -120,10 +120,10 @@ export const DEFAULT_CONFIG: AcousticShieldConfig = {
     watchCpaDistanceM: 5.0,
     maxSensorAgeS: 0.25,
   },
-  // activationConfirmS 0.1 s at 20 Hz: CRITICAL must hold across 3 consecutive radar scans before the sound plays.
+  // activationConfirmS 0.1 s at 50 Hz: CRITICAL must hold across 6 consecutive radar scans before the sound plays.
   protection: { requiredLeadTimeS: 0.3, activationConfirmS: 0.1, deactivateHoldS: 0.15 },
   sensor: {
-    updateRateHz: 20,
+    updateRateHz: 50,
     latencyS: 0.05,
     maxRangeM: 150,
     fovDeg: 360,

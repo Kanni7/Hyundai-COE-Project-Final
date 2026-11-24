@@ -4,7 +4,7 @@
 // parser handles everything else, and everything when the backend is unreachable.
 // Sentences neither can read with confidence go to the backend's command LLM (`interpret`).
 
-import type { Intent, ProfileId } from '../types';
+import type { Intent, ProfileId, RouteFailure, RouteInfo } from '../types';
 
 const rawApi = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
 export const API = rawApi ? rawApi.replace(/\/+$/, '') : '/api';
@@ -49,7 +49,25 @@ export interface Transcription {
   engine: string | null;
   /** Driver recognised from the voice (enrolled voiceprints), or null when unsure or nobody is enrolled. */
   speaker?: { profile: ProfileId; score: number } | null;
+  /** The language spoken ("ta"); `text` is already English when the cloud translated it. */
+  language?: string | null;
 }
+
+/** A downloadable on-device model: one per Indian language (offline speech) and the assistant (Gemma 3). */
+export interface PackInfo {
+  id: string;
+  kind: 'language' | 'assistant';
+  name: string;
+  mb: number;
+  installed: boolean;
+  /** Hindi: understood offline by the built-in Hinglish model, no download needed. */
+  builtin: boolean;
+  downloading?: boolean;
+  done?: number;
+  total?: number;
+  error?: string | null;
+}
+export interface PackStatus { active_language: string | null; packs: PackInfo[] }
 
 export interface SpeakerStatus {
   /** Speaker model installed on the backend. */
@@ -138,6 +156,8 @@ export interface AssistantReply {
   confidence: number;
 }
 
+const LOCAL_AI_TIMEOUT_MS = 30000; // Gemma 3 1B on the car's CPU: ~1 s on a laptop, a few s on a car chip
+const ROUTE_TIMEOUT_MS = 10000; // Google Routes (backend timeout 6 s)
 const CLOUD_TRANSCRIBE_TIMEOUT_MS = 30000; // Sarvam (with one retry), or the on-device fallback
 const CLOUD_INTERPRET_TIMEOUT_MS = 25000; // GPT-6.1 Sol (with one retry)
 
@@ -157,6 +177,16 @@ export const backend = {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, state }),
     }, CLOUD_INTERPRET_TIMEOUT_MS),
   reset: () => call<{ ok: boolean }>('/reset', { method: 'POST' }),
+  packs: () => call<PackStatus>('/packs'),
+  downloadPack: (id: string) => call<PackStatus>(`/packs/${encodeURIComponent(id)}/download`, { method: 'POST' }),
+  deletePack: (id: string) => call<PackStatus>(`/packs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  setDriverLanguage: (language: string | null) =>
+    call<PackStatus>('/packs/active-language', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language }) }),
+  /** The on-device assistant (Gemma 3 1B): general questions, answered in English. */
+  localAsk: (text: string, state: object) =>
+    call<{ answer: string; language: string }>('/local-ai/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, state }) }, LOCAL_AI_TIMEOUT_MS),
+  route: (origin: { lat: number; lng: number }, destination: string) =>
+    call<RouteInfo>('/nav/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin, destination }) }, ROUTE_TIMEOUT_MS),
   windSettings: () => call<WindSettings>('/wind-settings'),
   updateWindSettings: (settings: WindSettings) =>
     call<WindSettings>('/wind-settings', {
@@ -297,4 +327,26 @@ export async function recordAudio(maxMs = 8000, silenceMs = 900, options: Record
   }
   rec.start();
   return { stop, done };
+}
+
+/** The car's position (the browser's location stands in for the car's GPS), then its route to `destination`.
+ * Never throws: a failure says why, so the car can tell the driver instead of guessing numbers. */
+export async function fetchRoute(destination: string): Promise<RouteInfo | RouteFailure> {
+  let origin: { lat: number; lng: number };
+  try {
+    origin = await new Promise((resolve, reject) => {
+      if (!navigator.geolocation) { reject(new Error('no geolocation')); return; }
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }), reject,
+        { timeout: 5000, maximumAge: 60000 });
+    });
+  } catch {
+    return { error: "the car's location is not available", code: 'no_location' };
+  }
+  try {
+    return await backend.route(origin, destination);
+  } catch (e) {
+    if (e instanceof ApiError) return { error: e.message || 'the maps service failed', code: e.code };
+    return { error: 'the maps service is not reachable', code: 'network' };
+  }
 }

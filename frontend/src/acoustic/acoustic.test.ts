@@ -132,7 +132,8 @@ test('tracker rejects invalid measurements and never creates a track from them',
 
 test('Kalman tracker converges on a constant-velocity target from ideal measurements', () => {
   const tracker = new ObjectTracker(DEFAULT_CONFIG.tracker, IDEAL_SENSOR);
-  for (let k = 0; k < 10; k++) tracker.update([measurement({ captureTime: k * 0.05, range: 30 - 5 * k * 0.05 })], k * 0.05);
+  const dt = 1 / IDEAL_SENSOR.updateRateHz; // feed at the sensor's own scan rate
+  for (let k = 0; k * dt < 0.5 - 1e-9; k++) tracker.update([measurement({ captureTime: k * dt, range: 30 - 5 * k * dt })], k * dt);
   const [view] = tracker.views(0.5, 0.25);
   near(view.state.speed, 5, 0.02);
   near(view.state.x, 30 - 5 * 0.5, 0.02);
@@ -158,7 +159,7 @@ test('stale measurements: blackout stops trust and cancels active protection', (
   while (sim.protection.state !== 'ACTIVE' && !sim.ended) sim.step();
   assert.equal(sim.protection.state, 'ACTIVE');
   sim.setConfig({ ...config, sensor: { ...config.sensor, blackout: true } });
-  for (let i = 0; i < 40; i++) sim.step(); // 0.4 s without data
+  for (let i = 0; i < 50; i++) sim.step(); // 0.5 s without data: > 0.25 s stale limit + 0.15 s release hold
   const primary = sim.assessment.primary!;
   assert.equal(primary.trusted, false);
   assert.match(primary.reason, /stale/i);
@@ -192,11 +193,11 @@ test('protection never activates on elapsed time alone, only on the prediction, 
   assert.equal(ctl.state, 'STANDBY');
   assert.equal(commands.length, 0);
 
-  // CRITICAL must persist for activationConfirmS (3 radar scans at 20 Hz) before the sound starts.
+  // CRITICAL must persist for activationConfirmS (6 radar scans at 50 Hz) before the sound starts.
   ctl.update(20.0, fakeAssessment(1.1));
   assert.notEqual(ctl.state, 'ACTIVE');
   ctl.update(20.05, fakeAssessment(1.05));
-  assert.notEqual(ctl.state, 'ACTIVE'); // confirmation pending: 2 scans only
+  assert.notEqual(ctl.state, 'ACTIVE'); // confirmation pending: under 0.1 s
   assert.equal(commands.length, 0);
   ctl.update(20.1, fakeAssessment(1.0));
   assert.equal(ctl.state, 'ACTIVE');

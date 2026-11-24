@@ -276,6 +276,7 @@ export function speak(
   // Pre-process spoken automotive text for natural Indian pronunciation:
   const cleanText = text
     .replace(/°C/gi, ' degrees')
+    .replace(/₹\s?([\d,.]+)/g, '$1 rupees')
     .replace(/km\/h/gi, ' kilometers per hour')
     .replace(/psi/gi, 'P S I')
     .replace(/ACC/g, 'Accessory mode')

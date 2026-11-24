@@ -1,4 +1,4 @@
-import type { AmbientColor, CarState, ClusterView, Genre, Intent, Lang, Reply, Toast } from '../types';
+import type { AmbientColor, CarState, ClusterView, Genre, Intent, Lang, Reply, RouteFailure, RouteInfo, Toast } from '../types';
 import { AMBIENT_MODES, HUE_STEPS } from '../lib/ambient';
 import { fitFor, PROFILE_IDS, PROFILES } from '../lib/profiles';
 
@@ -113,7 +113,34 @@ function hash(s: string) {
 const r = (en: string, hi: string, toast?: Reply['toast']): Reply => ({ en, hi, toast });
 
 /** Live readings from the vehicle model that some intents depend on. */
-export interface Env { speed: number }
+/** `route`: live route facts fetched for this command (nav.start, trip questions); absent when none was needed. */
+export interface Env { speed: number; route?: RouteInfo | RouteFailure }
+
+const isRoute = (x: RouteInfo | RouteFailure | undefined): x is RouteInfo => !!x && !('error' in x);
+const dur = (m: number) => (m < 60 ? `${m} minutes` : `${Math.floor(m / 60)} hr ${m % 60} min`);
+const durHi = (m: number) => (m < 60 ? `${m} minute` : `${Math.floor(m / 60)} ghante ${m % 60} minute`);
+
+/** A trip question answered only from the fetched route: never an invented number. */
+function routeAnswer(topic: string, rt: RouteInfo | RouteFailure | undefined): Reply {
+  if (!rt) return r("Where to? Start navigation or name the place, like 'how long to Juhu Beach'.",
+    "Kahan jaana hai? Navigation shuru kijiye ya jagah boliye, jaise 'Juhu Beach tak kitna time'.");
+  if (!isRoute(rt)) return r(`I couldn't get the route: ${rt.error}.`, `Route nahi mil paaya: ${rt.error}.`);
+  const to = rt.destination;
+  if (topic === 'eta') return r(`${to} is about ${dur(rt.minutes)} away with current traffic, ${rt.km} km.`,
+    `${to} tak traffic ke saath lagbhag ${durHi(rt.minutes)} lagenge, ${rt.km} km.`, { icon: 'nav', label: to, value: dur(rt.minutes) });
+  if (topic === 'distance') return r(`${to} is ${rt.km} km away by road.`, `${to} sadak se ${rt.km} km door hai.`,
+    { icon: 'nav', label: to, value: `${rt.km} km` });
+  if (topic === 'toll') {
+    if (!rt.toll) return r(`No tolls on the way to ${to}.`, `${to} ke raaste mein koi toll nahi hai.`);
+    if (rt.toll.inr === null) return r(`There are tolls on the way to ${to}, but their price isn't available.`,
+      `${to} ke raaste mein toll hai, par keemat pata nahi.`);
+    return r(`Tolls to ${to} come to about ₹${Math.round(rt.toll.inr)}.`, `${to} tak lagbhag ₹${Math.round(rt.toll.inr)} toll lagega.`,
+      { icon: 'nav', label: 'Toll', value: `₹${Math.round(rt.toll.inr)}` });
+  }
+  return r(`About ₹${rt.fuel_inr} of petrol to ${to}: ${rt.fuel_litres} litres at ₹${rt.fuel_price_inr_per_l} a litre.`,
+    `${to} tak lagbhag ₹${rt.fuel_inr} ka petrol lagega: ${rt.fuel_litres} litre, ₹${rt.fuel_price_inr_per_l} litre ke hisaab se.`,
+    { icon: 'nav', label: 'Fuel cost', value: `₹${rt.fuel_inr}` });
+}
 
 /** Applies one intent; returns the new state plus what the car says back. */
 export function applyIntent(s: CarState, it: Intent, env: Env = { speed: 0 }): { state: CarState; reply: Reply } {
@@ -390,6 +417,18 @@ export function applyIntent(s: CarState, it: Intent, env: Env = { speed: 0 }): {
     }
 
     case 'nav.start': {
+      const rt = env.route;
+      if (rt && !isRoute(rt) && rt.code === 'no_route') {
+        return { state: s, reply: r(`I couldn't find a driving route to ${it.destination}.`, `${it.destination} ka raasta nahi mila.`) };
+      }
+      if (isRoute(rt)) {
+        return {
+          state: { ...s, nav: { destination: it.destination, minutes: rt.minutes, km: rt.km, startedAt: Date.now() }, screen: 'nav' },
+          reply: r(`Starting navigation to ${it.destination}: ${rt.km} km, about ${dur(rt.minutes)} with current traffic.`,
+            `${it.destination} ke liye navigation shuru: ${rt.km} km, traffic ke saath lagbhag ${durHi(rt.minutes)}.`),
+        };
+      }
+      // No route data (backend, key or location missing): the simulated estimate the demo always used.
       const h = hash(it.destination);
       const known: Record<string, [number, number]> = { Home: [24, 11.2], Office: [32, 15.8], Airport: [46, 27.4] };
       const [minutes, km] = known[it.destination] ?? [8 + (h % 40), Math.round((3 + (h % 250) / 10) * 10) / 10];
@@ -574,6 +613,9 @@ export function applyIntent(s: CarState, it: Intent, env: Env = { speed: 0 }): {
     }
 
     case 'query': {
+      if (it.topic === 'eta' || it.topic === 'distance' || it.topic === 'toll' || it.topic === 'fuel_cost') {
+        return { state: s, reply: routeAnswer(it.topic, env.route) };
+      }
       if (it.topic === 'temp') {
         return { state: s, reply: c.on
           ? r(`The cabin is set to ${fmt(c.temp)}, fan speed ${c.fan}.`, `AC abhi ${fmt(c.temp)} pe hai, fan speed ${c.fan}.`)

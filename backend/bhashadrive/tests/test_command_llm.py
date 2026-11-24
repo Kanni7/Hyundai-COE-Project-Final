@@ -55,6 +55,8 @@ def test_interpret_endpoint():
     assert c.get("/api/health").json()["llm_ready"] is True
     j = c.post("/api/interpret", json={"text": "AC 22 kar do aur mahaul romantic bana do"}).json()
     assert [i["type"] for i in j["intents"]] == ["climate.setTemp", "mood"]
-    off = TestClient(create_app(AppConfig(), make_pipeline()))
+    cfg = AppConfig()
+    cfg.command_llm.model_path = cfg.command_llm.model_path.with_name("missing.gguf")  # the real model may be installed
+    off = TestClient(create_app(cfg, make_pipeline()))
     assert off.get("/api/health").json()["llm_ready"] is False
     assert off.post("/api/interpret", json={"text": "x"}).status_code == 503

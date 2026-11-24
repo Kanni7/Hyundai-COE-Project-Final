@@ -64,7 +64,8 @@ export type Intent =
   | { type: 'adas.lka'; on: boolean }
   /** Smart Cruise Control: set speed in km/h, nudge it, or cancel. */
   | { type: 'cruise'; on: boolean; speed?: number; delta?: number }
-  | { type: 'query'; topic: 'temp' | 'fuel' | 'music' | 'time' | 'speed' | 'tyres' }
+  /** eta / distance / toll / fuel_cost: trip questions, answered from live route data (`destination` or the active route). */
+  | { type: 'query'; topic: 'temp' | 'fuel' | 'music' | 'time' | 'speed' | 'tyres' | RouteTopic; destination?: string }
   | { type: 'greet' }
   | { type: 'help' }
   | { type: 'thanks' }
@@ -127,5 +128,22 @@ export interface ChatMessage {
   intents?: Intent[];
   via?: 'voice' | 'text' | 'chip';
   /** Which NLU understood the command (set only while the backend is connected). */
-  engine?: 'backend' | 'local' | 'llm' | 'cloud';
+  engine?: 'backend' | 'local' | 'llm' | 'cloud' | 'assistant';
 }
+
+export type RouteTopic = 'eta' | 'distance' | 'toll' | 'fuel_cost';
+
+/** Backend /nav/route: Google Routes facts from the car's position. `toll` null = no toll on the route;
+ * `toll.inr` null = tolls with no known price. */
+export interface RouteInfo {
+  destination: string;
+  km: number;
+  minutes: number;
+  toll: { inr: number | null } | null;
+  fuel_litres: number;
+  fuel_inr: number;
+  fuel_price_inr_per_l: number;
+}
+
+/** Why no route came back. `no_route`: the maps service found no road route to that place. */
+export interface RouteFailure { error: string; code: string | null }

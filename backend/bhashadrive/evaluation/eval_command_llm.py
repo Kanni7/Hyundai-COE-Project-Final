@@ -48,11 +48,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--parser", type=Path, help="rule-based parser answers for the test sentences (JSONL)")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--test", default="test", help="data/command_llm/<name>.jsonl (test_v1: the v1 benchmark)")
+    ap.add_argument("--report", default="command_llm_eval", help="reports/<name>.json")
     args = ap.parse_args(argv)
     from ..config import CommandLLMConfig
     from ..nlu.command_llm import CommandLLM
 
-    rows = [json.loads(l) for l in (ROOT / "data" / "command_llm" / "test.jsonl").read_text(encoding="utf-8").splitlines()]
+    rows = [json.loads(l) for l in (ROOT / "data" / "command_llm" / f"{args.test}.jsonl").read_text(encoding="utf-8").splitlines()]
     rows = rows[: args.limit] if args.limit else rows
     proc = psutil.Process()
     rss0 = proc.memory_info().rss
@@ -77,7 +79,7 @@ def main(argv=None) -> int:
         parsed = [json.loads(l) for l in args.parser.read_text(encoding="utf-8").splitlines()][: len(rows)]
         parsed = [p["intents"] if isinstance(p, dict) else p for p in parsed]  # {intents, unparsed} or a bare list
         report["rule_parser"] = score(rows, parsed)
-    (ROOT / "reports" / "command_llm_eval.json").write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
+    (ROOT / "reports" / f"{args.report}.json").write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k != "errors"}, indent=1, ensure_ascii=False))
     return 0
 

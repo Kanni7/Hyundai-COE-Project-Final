@@ -63,7 +63,10 @@ COMMANDS: dict[str, list[tuple[str, dict, bool]]] = {
     "cluster.view": [("view", {"enum": ["drive", "trip", "tyres"]}, False), ("dir", {"enum": [1, -1]}, False)],
     "adas.lka": [("on", _BOOL, True)],
     "cruise": [("on", _BOOL, True), ("speed", _int(30, 180), False), ("delta", _int(-20, 20), False)],
-    "query": [("topic", {"enum": ["temp", "fuel", "music", "time", "speed", "tyres"]}, True)],
+    # eta / distance / toll / fuel_cost are trip questions answered from live route data; `destination`
+    # names the place when the driver says one ("Juhu tak kitna time"), otherwise the active route is meant.
+    "query": [("topic", {"enum": ["temp", "fuel", "music", "time", "speed", "tyres", "eta", "distance", "toll", "fuel_cost"]}, True),
+              ("destination", {"type": "string", "minLength": 1, "maxLength": 60}, False)],
     "greet": [],
     "help": [],
     "thanks": [],

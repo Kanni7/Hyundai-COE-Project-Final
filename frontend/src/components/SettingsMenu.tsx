@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { FlaskConical, Layers, Maximize, MessageSquareText, Settings, Volume2, Wind } from 'lucide-react';
 import { useSpeechVoices, testVoiceSample } from '../lib/speech';
 import type { Entitlement, WindSettings, WindTestResult } from '../lib/backend';
+import { LanguagePacks } from './LanguagePacks';
 
 interface Props {
   /** Connection line, e.g. "BhashaDrive NLU · English · हिन्दी · Hinglish"; `detail` goes in its tooltip. */
@@ -111,6 +112,8 @@ export function SettingsMenu(p: Props) {
               <Segmented value={p.asr} onChange={p.onAsr} options={[['browser', 'Web'], ['server', 'Server']]} />
             </Row>
            )}
+           <hr />
+           <LanguagePacks />
            <hr />
            <div className="settings-heading"><Wind /><span>Wind suppression</span>{p.windSaving && <small>Saving…</small>}</div>
            {p.windSettings ? (
