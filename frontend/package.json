@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "rolldown src/nlu/trip.test.ts -p node -f esm --external node:* -o .test-build/trip.test.mjs && node --experimental-strip-types --test src/lib/safeExit.test.ts src/lib/fatigue.test.ts src/acoustic/acoustic.test.ts .test-build/trip.test.mjs",
+    "test": "rolldown src/nlu/trip.test.ts -p node -f esm --external node:* -o .test-build/trip.test.mjs && node --experimental-strip-types --test src/lib/safeExit.test.ts src/lib/fatigue.test.ts src/lib/drowsiness.test.ts src/acoustic/acoustic.test.ts .test-build/trip.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

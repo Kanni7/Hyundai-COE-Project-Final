@@ -45,7 +45,7 @@ export interface DriverStatus {
   headPose: HeadPose | null;
 }
 
-export const DROWSY_CLOSED_S = 2;
+export const DROWSY_CLOSED_S = 2.5;
 export const PERCLOS_WINDOW_S = 30;
 export const PERCLOS_MIN_S = 10;
 export const PERCLOS_TIRED = 0.15;
@@ -69,6 +69,8 @@ const MICROSLEEPS_DROWSY = 3;
 const MICROSLEEP_DROWSY_ACTIVE_S = 8;
 const MAX_SAMPLE_GAP_MS = 650;
 const DROWSY_HOLD_MS = AWAKE_S * 1000;
+/** Head tilted this far down counts as a nod (the face is still found, but too steep to read reliably). */
+const NOD_PITCH = 0.45;
 
 export class DrowsinessTracker {
   private samples: { t: number; closed: boolean }[] = [];
@@ -137,6 +139,11 @@ export class DrowsinessTracker {
           this.eyes(t, cues.eyeClosure);
           this.mouth(t, cues.jawOpen);
         }
+      } else if (this.calibrated && this.closed && (cues.headPose?.pitch ?? 0) > NOD_PITCH) {
+        // Eyes already shut and the head drops forward: the classic nod-off. The steep angle makes the
+        // face unreliable to read, but it must not pause the closure timer, so keep counting it as closed.
+        this.lastGoodFace = t;
+        this.samples.push({ t, closed: true });
       }
     }
 

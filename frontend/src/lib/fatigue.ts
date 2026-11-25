@@ -3,8 +3,8 @@
 // (lib/drowsiness.ts) says *what* it sees; this module decides *what the car does*.
 //
 // Level 1  cabin wake-up    driver looks tired
-// Level 2  MYRA check-in    still tired after the wait, or a first sign of drowsiness
-// Level 3  emergency        eyes shut too long, or drowsy again after MYRA's check-in
+// Level 2  MYRA check-in    still tired after the wait, or strong fatigue signs (heavy eye closure, microsleeps)
+// Level 3  emergency        eyes shut for 2.5 s (less at night or on a long trip)
 //
 // Two kinds of time are used. Eye closure is always real seconds (a blink is a blink).
 // Waits (Level 1 -> 2, snooze, recovery) run on a "simulated" clock that demo mode speeds
@@ -63,7 +63,7 @@ export type FatigueEvent =
 export interface Limits {
   /** Simulated seconds of continued tiredness before Level 1 becomes Level 2. */
   l2WaitS: number;
-  /** Real seconds of continuous eye closure that jump straight to Level 3. */
+  /** Real seconds of continuous eye closure that trigger Level 3 from any level. */
   l3ClosedS: number;
 }
 
@@ -74,9 +74,9 @@ export const NIGHT_TO_H = 5;
 export const LONG_TRIP_MIN = 120;
 /** How the wait and the eye-closure limit tighten with context risk. */
 export const LIMITS: Record<ContextRisk, Limits> = {
-  normal: { l2WaitS: 60, l3ClosedS: 5 },
-  elevated: { l2WaitS: 40, l3ClosedS: 4 },
-  high: { l2WaitS: 20, l3ClosedS: 3 },
+  normal: { l2WaitS: 60, l3ClosedS: 2.5 },
+  elevated: { l2WaitS: 40, l3ClosedS: 2 },
+  high: { l2WaitS: 20, l3ClosedS: 1.5 },
 };
 /** Demo mode runs waits six times faster: 60 s shows as 1:00 but takes 10 s. */
 export const DEMO_TIME_SCALE = 6;
@@ -244,18 +244,14 @@ export class FatigueController {
       return events;
     }
 
+    // Strong fatigue signs (eyes closed a large share of the time, repeated microsleeps) skip the
+    // Level 1 wait and go to the check-in. Level 3 is only ever for eyes that stay shut (above).
     if (drowsy) {
       this.alertS = 0;
-      if (newDrowsy) {
-        if (this.level >= 2 || snoozed) {
-          if (this.level < 3) {
-            const why = this.level >= 2 ? `Drowsy despite MYRA's check-in: ${lower(input.reason)}` : `Drowsy after declining a break: ${lower(input.reason)}`;
-            this.go(3, why, events, t);
-          }
-        } else {
-          this.go(2, `Drowsiness detected: ${lower(input.reason)}`, events, t);
-        }
-      }
+      // The monitor keeps saying "drowsy" for a moment after the eyes open: hold the emergency until then.
+      if (this.level === 3) return events;
+      const target: FatigueLevel = snoozed ? 1 : 2;
+      if (newDrowsy && this.level < target) this.go(target, `Strong fatigue signs: ${lower(input.reason)}`, events, t);
       return events;
     }
 
