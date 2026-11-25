@@ -15,6 +15,8 @@ import { VoiceDock } from './components/VoiceDock';
 import { SettingsMenu } from './components/SettingsMenu';
 import { BharatConnect } from './components/BharatConnect';
 import { DriverMonitor } from './components/DriverMonitor';
+import { FatigueHud } from './components/FatigueHud';
+import { useFatigueGuard } from './lib/useFatigueGuard';
 import { SafeExitGuardian } from './components/SafeExitGuardian';
 // three.js is only downloaded when the simulator is opened.
 const AcousticShield = lazy(() => import('./components/AcousticShield'));
@@ -295,12 +297,37 @@ export default function App() {
     setCar(next);
   }, []);
 
+  // MYRA's fatigue response (lib/useFatigueGuard.ts): MYRA speaks, and for a yes/no question opens the mic.
+  const fatigueSay = useCallback((text: string, opts?: { confirm?: boolean }) => {
+    const confirm = !!opts?.confirm;
+    setMessages((m) => [...m, { id: nextId++, role: 'car', text }]);
+    setReply({ text, intents: [], understood: true, asks: confirm, confirm });
+    const answerBack = () => { if (confirm) window.setTimeout(() => listenForAnswer.current(), 300); };
+    if (ttsRef.current && 'speechSynthesis' in window) {
+      speak(text,
+        () => { setPhase('speaking'); carAudio.duck(true); },
+        () => { setPhase('idle'); carAudio.duck(false); answerBack(); });
+    } else {
+      answerBack();
+    }
+  }, []);
+  // Driving to a rest stop after the driver agrees to a break.
+  const fatigueNav = useCallback((destination: string) => {
+    const out = runIntents(carRef.current, [{ type: 'nav.start', destination }], 'en', { speed: engine.speed });
+    commit(out.state);
+  }, [commit]);
+  const guard = useFatigueGuard({ carRef, commit, say: fatigueSay, startNav: fatigueNav, monitorOn });
+  const fatigueAnswer = useRef(guard.tryAnswer);
+  useEffect(() => { fatigueAnswer.current = guard.tryAnswer; }, [guard.tryAnswer]);
+
   /** `speaker`: the driver profile the backend recognised from the voice, switched to before the command runs. */
   const handleCommand = useCallback((text: string, via: ChatMessage['via'], speaker?: ProfileId) => {
     carAudio.unlock();
     if (via !== 'voice') spokenLang.current = null;
     setMessages((m) => [...m, { id: nextId++, role: 'user', text, via }]);
     setHeard({ text, via: via ?? 'text' });
+    // "Haan" / "Nahi" to MYRA's fatigue check-in ("Thak gaye? ... rukein?") is answered by the fatigue response.
+    if (fatigueAnswer.current(text)) { setPhase('idle'); return; }
     setPhase('thinking');
     const started = Date.now();
     const parsed = parseCommand(text, nlu.current);
@@ -808,7 +835,7 @@ export default function App() {
 
   return (
     <div className={`app scene-${scene.id}`}>
-      <Cockpit car={car} scene={scene} toast={toast} onIntent={handleIntent}
+      <Cockpit car={car} scene={scene} toast={toast} onIntent={handleIntent} spotlights={guard.spotlights}
         view={view} onToggleFocus={() => setView((v) => (v === 'screen' ? 'cabin' : 'screen'))} onMic={toggleMic}
         voice={{ phase: livePhase, interim: speech.interim, reply: reply?.text ?? '' }} />
 
@@ -1014,7 +1041,11 @@ export default function App() {
         </Suspense>
       )}
 
-      {monitorOn && <DriverMonitor onClose={() => setMonitorOn(false)} />}
+      {monitorOn && (
+        <DriverMonitor onClose={() => setMonitorOn(false)} onStatus={guard.onMonitorStatus} guard={guard} car={car}
+          onStartEngine={() => handleIntent({ type: 'ignition', mode: 'on' })} />
+      )}
+      <FatigueHud guard={guard} car={car} monitorOn={monitorOn} />
 
       {bharatOpen && <BharatConnect onClose={() => setBharatOpen(false)} />}
 
