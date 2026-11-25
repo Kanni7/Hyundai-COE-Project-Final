@@ -1,6 +1,6 @@
-import { useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import type { CarState, Intent } from '../types';
-import { aimVent, ventAims, type VentAim } from '../lib/ventAim';
+import { aimVent, onVentsMoved, ventAims, type VentAim } from '../lib/ventAim';
 import { Part } from './Part';
 
 /**
@@ -58,6 +58,8 @@ function Slat({ x0, x1, y, tilt }: { x0: number; x1: number; y: number; tilt: nu
 export function VentModule({ car, onIntent }: { car: CarState; onIntent: (i: Intent) => void }) {
   const [aims, setAims] = useState<VentAim[]>(() => ventAims.map((a) => ({ ...a })));
   const drag = useRef<{ i: number; x: number; y: number; aim: VentAim } | null>(null);
+  // The car can swing the vents itself (fatigue response): follow it.
+  useEffect(() => onVentsMoved(() => setAims(ventAims.map((a) => ({ ...a })))), []);
 
   const aimAt = (i: number, aim: VentAim) => {
     aimVent(i, aim);

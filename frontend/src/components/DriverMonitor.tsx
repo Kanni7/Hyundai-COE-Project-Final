@@ -1,8 +1,9 @@
 // Driver monitoring camera: face tracking and drowsiness scoring stay in the browser. The monitor
-// only keeps numeric cues in memory; it never uploads or stores camera frames.
+// only keeps numeric cues in memory; it never uploads or stores camera frames. What the car does
+// about the driver's state (alarms, cabin changes, voice) lives in lib/useFatigueGuard.ts.
 
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Eye, EyeOff, Minus, RefreshCw, ScanFace, X } from 'lucide-react';
+import { CameraOff, Eye, EyeOff, Minus, RefreshCw, ScanFace, X } from 'lucide-react';
 import type { FaceLandmarker as FaceLandmarkerT } from '@mediapipe/tasks-vision';
 import {
   DROWSY_CLOSED_S,
@@ -13,15 +14,19 @@ import {
   type DriverStatus,
   type HeadPose,
 } from '../lib/drowsiness';
-import { carAudio } from '../lib/audio';
-import { speak } from '../lib/speech';
+import type { CarState } from '../types';
+import type { FatigueGuard } from '../lib/useFatigueGuard';
+import { FatiguePresenter, FatigueTimeline } from './FatiguePanel';
 
 const ASSETS = `${import.meta.env.BASE_URL}mediapipe`;
 const LEFT_EYE = [33, 160, 158, 133, 153, 144];
 const RIGHT_EYE = [362, 385, 387, 263, 373, 380];
 const MOUTH = [61, 81, 13, 311, 291, 402, 14, 178];
-const WARN_EVERY_MS = 6000;
-const TIRED_HINT_EVERY_MS = 120_000;
+/** A covered lens: very dark, or one flat colour, for this long with no face in view. */
+const BLOCKED_MEAN = 28;
+const BLOCKED_SPREAD = 6;
+const BLOCKED_HOLD_MS = 1000;
+const BLOCK_CHECK_MS = 400;
 
 type Point = { x: number; y: number; z?: number };
 
@@ -90,14 +95,48 @@ async function loadLandmarker(): Promise<FaceLandmarkerT> {
   }
 }
 
-export function DriverMonitor({ onClose }: { onClose: () => void }) {
+/** Brightness mean and spread of a tiny copy of the frame: a hand or tape over the lens is dark or flat. */
+function lensCovered(v: HTMLVideoElement, probe: HTMLCanvasElement): boolean {
+  const g = probe.getContext('2d', { willReadFrequently: true });
+  if (!g || !v.videoWidth) return false;
+  g.drawImage(v, 0, 0, probe.width, probe.height);
+  const px = g.getImageData(0, 0, probe.width, probe.height).data;
+  let sum = 0;
+  let sq = 0;
+  const n = px.length / 4;
+  for (let i = 0; i < px.length; i += 4) {
+    const y = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+    sum += y;
+    sq += y * y;
+  }
+  const mean = sum / n;
+  const spread = Math.sqrt(Math.max(0, sq / n - mean * mean));
+  return mean < BLOCKED_MEAN || spread < BLOCKED_SPREAD;
+}
+
+type Tab = 'monitor' | 'timeline' | 'presenter';
+
+interface Props {
+  onClose: () => void;
+  /** Every reading goes to the fatigue response; `blocked` = the lens looks covered. */
+  onStatus: (st: DriverStatus, blocked: boolean) => void;
+  guard: FatigueGuard;
+  car: CarState;
+  onStartEngine: () => void;
+}
+
+export function DriverMonitor({ onClose, onStatus, guard, car, onStartEngine }: Props) {
   const video = useRef<HTMLVideoElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const trackerRef = useRef<DrowsinessTracker | null>(null);
   const [status, setStatus] = useState<DriverStatus | null>(null);
+  const [blocked, setBlocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [mini, setMini] = useState(false);
+  const [tab, setTab] = useState<Tab>('monitor');
+  const statusCb = useRef(onStatus);
+  useEffect(() => { statusCb.current = onStatus; }, [onStatus]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -106,6 +145,12 @@ export function DriverMonitor({ onClose }: { onClose: () => void }) {
     let stopped = false;
     let lastVideoTime = -1;
     let lastUi = 0;
+    let lastProbe = 0;
+    let darkSince: number | null = null;
+    let isBlocked = false;
+    const probe = document.createElement('canvas');
+    probe.width = 32;
+    probe.height = 24;
     const tracker = new DrowsinessTracker();
     trackerRef.current = tracker;
 
@@ -163,10 +208,19 @@ export function DriverMonitor({ onClose }: { onClose: () => void }) {
           ? { eyeClosure: 0, jawOpen: 0, confidence: 0.25, headPose: pose ?? undefined }
           : null;
       const st = tracker.update(now, cues);
+      // Covered lens: checked only while no face is found, so a dark cabin with a visible face never counts.
+      if (now - lastProbe > BLOCK_CHECK_MS) {
+        lastProbe = now;
+        const covered = !points && lensCovered(v, probe);
+        darkSince = covered ? (darkSince ?? now) : null;
+        isBlocked = darkSince !== null && now - darkSince >= BLOCKED_HOLD_MS;
+      }
       draw(points, st);
+      statusCb.current(st, isBlocked);
       if (now - lastUi > 100 || st.state === 'drowsy') {
         lastUi = now;
         setStatus(st);
+        setBlocked(isBlocked);
       }
     };
 
@@ -203,45 +257,18 @@ export function DriverMonitor({ onClose }: { onClose: () => void }) {
     setStatus(null);
   };
 
-  // Warnings: alarm + repeated voice while drowsy, a gentle spoken hint when tired.
-  const state = status?.state;
-  const reason = status?.reason;
-  useEffect(() => {
-    if (state !== 'drowsy') return;
-    carAudio.alarm(true);
-    const warn = () => speak('Wake up! You seem drowsy. Please open your eyes and take a break soon.');
-    warn();
-    const t = window.setInterval(warn, WARN_EVERY_MS);
-    return () => {
-      window.clearInterval(t);
-      carAudio.alarm(false);
-      window.speechSynthesis?.cancel();
-    };
-  }, [state]);
-
-  const lastHint = useRef(-Infinity);
-  useEffect(() => {
-    if (state !== 'tired' || performance.now() - lastHint.current < TIRED_HINT_EVERY_MS) return;
-    lastHint.current = performance.now();
-    speak(`You look tired: ${reason?.toLowerCase()}. Consider a short break.`);
-  }, [state, reason]);
-  useEffect(() => () => carAudio.alarm(false), []);
+  // Alarms, voice and cabin changes for these states are run by the fatigue response (useFatigueGuard).
 
   const s = status?.state ?? 'starting';
+  const label = blocked ? 'Camera blocked' : LABEL[s];
+  const sub = blocked ? 'Lens covered: monitoring paused, not treated as drowsiness' : status?.reason ?? '';
   const perclos = status?.perclos;
   const confidence = status?.confidence ?? 0;
   const pose = status?.headPose;
   const poseLabel = !pose ? '—' : Math.abs(pose.yaw) > 0.4 ? 'turned' : Math.abs(pose.pitch) > 0.45 ? 'tilted' : 'centred';
   return (
     <>
-      {s === 'drowsy' && (
-        <div className="dm-alarm" role="alert">
-          <AlertTriangle />
-          <b>WAKE UP!</b>
-          <span>{status?.reason}. Please take a break.</span>
-        </div>
-      )}
-      <section className={`dm ${s} ${mini ? 'mini' : ''}`} aria-label="Driver monitor">
+      <section className={`dm ${blocked ? 'no-face' : s} ${mini ? 'mini' : ''} tab-${tab}`} aria-label="Driver monitor">
         <header>
           <ScanFace />
           <b>Driver monitor</b>
@@ -249,14 +276,23 @@ export function DriverMonitor({ onClose }: { onClose: () => void }) {
           <button onClick={() => setMini((m) => !m)} aria-label={mini ? 'Expand driver monitor' : 'Minimise driver monitor'}><Minus /></button>
           <button onClick={onClose} aria-label="Turn off driver monitor"><X /></button>
         </header>
+        {!mini && (
+          <div className="dm-tabs" role="tablist">
+            {(['monitor', 'timeline', 'presenter'] as Tab[]).map((t) => (
+              <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
+                {t === 'monitor' ? 'Monitor' : t === 'timeline' ? `Timeline${guard.timeline.length ? ` (${guard.timeline.length})` : ''}` : 'Presenter'}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="dm-cam">
           <video ref={video} muted playsInline aria-label="Mirrored driver camera" />
           <canvas ref={canvas} />
           {(loading || error) && <p className="dm-msg">{error ?? 'Starting camera and face model…'}</p>}
         </div>
         <div className="dm-state" aria-live="polite">
-          {s === 'alert' || s === 'tired' ? <Eye /> : <EyeOff />}
-          <div><b>{LABEL[s]}</b><span>{status?.reason ?? ''}</span></div>
+          {blocked ? <CameraOff /> : s === 'alert' || s === 'tired' ? <Eye /> : <EyeOff />}
+          <div><b>{label}</b><span>{sub}</span></div>
         </div>
         {!mini && (
           <>
@@ -282,6 +318,8 @@ export function DriverMonitor({ onClose }: { onClose: () => void }) {
             </dl>
           </>
         )}
+        {!mini && tab === 'timeline' && <FatigueTimeline guard={guard} />}
+        {!mini && tab === 'presenter' && <FatiguePresenter guard={guard} car={car} onStartEngine={onStartEngine} />}
         {!mini && (
           <p className="dm-note">
             Video is processed on this device only. Monitoring is assistive, not autonomous.

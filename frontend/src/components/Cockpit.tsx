@@ -12,6 +12,7 @@ import { Airflow } from './Airflow';
 import { Windshield } from './Windshield';
 import { Infotainment, type VoicePhase } from './Infotainment';
 import { DrawnCabin } from '../drawn/DrawnCabin';
+import type { Spotlight } from '../lib/useFatigueGuard';
 
 interface Props {
   car: CarState;
@@ -24,6 +25,8 @@ interface Props {
   /** Double-clicking the screen leans in to it, or back out. */
   onToggleFocus: () => void;
   onMic: () => void;
+  /** Rings around cabin parts the car just changed on its own (fatigue response), drawn cockpit only. */
+  spotlights?: Spotlight[];
 }
 
 /** 'seats' shows the cabin behind the seat side view (SeatView). */
@@ -54,7 +57,7 @@ function useViewport() {
   return vp;
 }
 
-export function Cockpit({ car, scene, toast, voice, onIntent, view, onToggleFocus, onMic }: Props) {
+export function Cockpit({ car, scene, toast, voice, onIntent, view, onToggleFocus, onMic, spotlights = [] }: Props) {
   const vp = useViewport();
   // Space the voice assistant takes (mirrors `.dock` in index.css): a column over the empty passenger
   // side of a wide window, a strip along the bottom of a narrow one.
@@ -160,6 +163,11 @@ export function Cockpit({ car, scene, toast, voice, onIntent, view, onToggleFocu
           {drawn ? (
             <>
               <DrawnCabin car={car} onIntent={onIntent} onMic={onMic} airflow={airflow} screen={screen} />
+              {spotlights.map(({ id, rect: [x, y, w, h], label, tone, below }) => (
+                <div key={id} className={`spotlight ${tone} ${below ? 'below' : ''}`} style={{ left: x, top: y, width: w, height: h }} aria-hidden>
+                  {label && <span>{label}</span>}
+                </div>
+              ))}
               {/* Dev aid: ?compare=split or ?compare=overlay lays the source photo over the drawing */}
               {COMPARE && <img className={`layer compare-${COMPARE}`} src={scene.src} alt="" />}
             </>
