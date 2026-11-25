@@ -57,7 +57,7 @@ export function FatiguePresenter({ guard, car, onStartEngine }: { guard: Fatigue
       <p className="fg-hint">
         {p.sim === 'camera' ? 'Using the real camera.'
           : p.sim === 'tired' ? `Level 1 now, Level 2 after ${clock(l.l2WaitS)} of tiredness.`
-            : p.sim === 'eyes-closed' ? `Level 2 at 2 s, Level 3 at ${l.l3ClosedS} s of closed eyes.`
+            : p.sim === 'eyes-closed' ? `Level 3 at ${l.l3ClosedS} s of closed eyes.`
               : p.sim === 'blocked' ? 'Covered lens: monitoring pauses, nothing escalates.'
                 : 'Driver awake: an episode ends after 0:30 of alertness.'}
       </p>

@@ -26,7 +26,7 @@ Each item says whether it was approved, and ticks off as it gets built.
 | 2 | **Level 2, MYRA talks**: if tired persists for 1 min, MYRA asks to stop; "yes" starts navigation to a dhaba | **Demo timing:** the wait is really **10 s** but the screen shows it as **1 minute** (time runs ×6 in demo mode) |
 | 3 | **Level 3, emergency**: urgent alarm, "stop safely", hazard lights | Needs a **good hazard animation** (both indicators flashing on cluster and car) and the **real hazard "tick-tock" sound** |
 | 4 | **Camera blocked ≠ drowsy**: covered camera or hidden face gives "camera blocked", never a drowsy alarm | Shown on screen |
-| 5 | **Jump straight to Level 3** in an emergency | Threshold changed from 2 s to **5 s** of closed eyes |
+| 5 | **Jump straight to Level 3** in an emergency | Threshold was 5 s; changed to **2.5 s** of closed eyes after testing with the real camera (see *Change log*) |
 | 7 | **Time of day and trip length make the system more sensitive** (never trigger on their own) | How it works is explained below |
 | 9 | **Fresh air at Level 1**: recirculation off | Shown on screen |
 | 10 | **Restore the cabin** after the driver recovers (AC, fan, vents, lights back to before) | Driver's own manual changes during the episode are kept |
@@ -62,9 +62,9 @@ They set a **context risk** level, which only changes *how quickly* the system e
 
 | Context risk | When | Tired → Level 2 wait | Eyes closed → Level 3 |
 |---|---|---|---|
-| **Normal** | neither factor | 60 s | 5 s |
-| **Elevated** | one factor | 40 s | 4 s |
-| **High** | both factors | 20 s | 3 s |
+| **Normal** | neither factor | 60 s | 2.5 s |
+| **Elevated** | one factor | 40 s | 2 s |
+| **High** | both factors | 20 s | 1.5 s |
 
 Rules:
 - Context **never** triggers any level by itself. A rested driver at 2 a.m. gets no warning.
@@ -76,7 +76,7 @@ Rules:
 
 ## Build progress
 
-All items are built. Type check, lint and all 54 frontend tests pass (15 new tests for the escalation logic).
+All items are built. Type check, lint and all 58 frontend tests pass (16 for the escalation logic, 3 for the camera tracker).
 **Still to do: a click-through in the browser.** The Chrome extension wasn't connected, so nothing has been checked by eye yet.
 
 - [x] Central controller + escalation logic (#16, #5, #7, #11) with tests
@@ -94,12 +94,11 @@ All items are built. Type check, lint and all 54 frontend tests pass (15 new tes
 
 | Trigger | Result |
 |---|---|
-| Camera says **tired** (slow blinking, yawns, microsleeps) | **Level 1** |
+| Camera says **tired** (slow heavy blinking, 2 yawns, 2 microsleeps) | **Level 1** |
 | Still tired after the wait (1:00 normal; 10 s real in demo timing) | **Level 2**: MYRA asks |
-| First sign of **drowsy** (e.g. eyes closed 2 s) | **Level 2** straight away, skipping the wait |
-| Drowsy **again** after MYRA asked, or after the driver said "no" | **Level 3** |
-| Eyes closed **5 s** (4 s / 3 s with context risk) | **Level 3** from any level |
-| Eyes open again during Level 3 | Alarm stops, back to Level 2; hazards stay on |
+| **Strong** fatigue signs (eyes closed 30% of the last 30 s, 3 microsleeps) | **Level 2** straight away, skipping the wait (Level 1 if the driver has snoozed MYRA) |
+| Eyes closed **2.5 s** (2 s / 1.5 s with context risk), including a head nodding forward | **Level 3** from any level. This is the only way to reach Level 3 |
+| Eyes open again during Level 3 | Alarm stops a few seconds later, back to Level 2; hazards stay on |
 | Alert for 0:30 (5 s real in demo timing) | Episode ends, cabin restored |
 | Camera blocked / face not visible | Level held, all timers paused, never escalates |
 | Engine off or Driver Monitor closed | Episode ends, cabin restored |
@@ -133,7 +132,7 @@ All items are built. Type check, lint and all 54 frontend tests pass (15 new tes
 2. Optional: tick **Night drive** to show context ("Elevated → faster escalation").
 3. Press **Tired**: Level 1 plays out (AC ticks down, vents swing, light turns cyan, fresh air), and the countdown shows "1:00".
 4. After about 10 s, Level 2: MYRA asks "Thak gaye? …". Answer **Nahi** to show the snooze, or **Haan** to show navigation.
-5. Press **Eyes closed**: about 5 s later, Level 3 (alarm, red pulse, hazards with sound and animation).
+5. Press **Eyes closed** (or close your eyes in camera mode): after 2.5 s, Level 3 (alarm, red pulse, hazards with sound and animation).
 6. Press **Alert**: the alarm stops; after about 5 s the cabin is restored.
 7. Press **Blocked** to show that a covered camera is not treated as drowsiness.
 8. Open the **Timeline** tab to show the full record of what happened and why.
@@ -151,3 +150,20 @@ All items are built. Type check, lint and all 54 frontend tests pass (15 new tes
 | `frontend/src/lib/ventAim.ts`, `drawn/VentModule.tsx` | Vents can now be swung by the car (animated) |
 | `frontend/src/components/Cockpit.tsx` | Spotlight rings on the cabin |
 | `frontend/src/App.tsx` | Wiring; "Haan/Nahi" answers routed to the check-in |
+
+---
+
+## Change log
+
+**After the first real-camera test: Level 3 wasn't firing when the eyes were closed.**
+
+Likely causes (found by reading the code, not yet confirmed on camera):
+1. At **2 s** of closed eyes the old rules jumped to Level 2, so MYRA started asking a question. Most people open their eyes when the car talks, so the closure never reached the 5 s Level 3 limit.
+2. When the head **dropped forward** with the eyes shut (the usual way someone nods off), the camera treated the steep angle as "can't assess" and **stopped counting** the closure.
+
+Fixes:
+- Level 3 now fires at **2.5 s** of closed eyes (2 s / 1.5 s with night or long-trip context).
+- Closed eyes **no longer trigger Level 2** first, so nothing interrupts the count before Level 3.
+- Levels 1 and 2 now come only from **tiredness**: slow blinking, yawns, microsleeps, and the 1-minute wait.
+- A head nodding forward while the eyes are shut **keeps counting** as closed. Looking down with the eyes open does not.
+- The camera's own "drowsy" reading now starts at 2.5 s too (was 2 s), so the panel and the HUD agree.

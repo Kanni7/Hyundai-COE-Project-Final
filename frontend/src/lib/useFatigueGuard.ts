@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CarState } from '../types';
 import { TEMP_MIN } from '../state/car';
-import type { DriverStatus } from './drowsiness';
+import { DROWSY_CLOSED_S, type DriverStatus } from './drowsiness';
 import {
   DEMO_TIME_SCALE,
   FatigueController,
@@ -360,7 +360,7 @@ export function useFatigueGuard({ carRef, commit, say, startNav, monitorOn }: De
         input = { ...base, signal: 'tired', closedS: 0, reason: SIM_REASON };
       } else if (sm.mode === 'eyes-closed') {
         const closedS = (now - sm.closedAt) / 1000;
-        input = { ...base, signal: closedS >= 2 ? 'drowsy' : 'alert', closedS, reason: `Eyes closed for ${closedS.toFixed(1)} s (simulated)` };
+        input = { ...base, signal: closedS >= DROWSY_CLOSED_S ? 'drowsy' : 'alert', closedS, reason: `Eyes closed for ${closedS.toFixed(1)} s (simulated)` };
       } else if (sm.mode === 'blocked') {
         input = { ...base, signal: 'blocked', closedS: 0, reason: 'Camera blocked (simulated)' };
       } else {

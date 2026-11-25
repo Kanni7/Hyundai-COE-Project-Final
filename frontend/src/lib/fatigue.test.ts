@@ -52,23 +52,35 @@ test('demo timing reaches Level 2 in about 10 real seconds', () => {
   assert.equal(c.snapshot().level, 2);
 });
 
-test('eyes closed for 5 s jumps straight to Level 3', () => {
+test('eyes closed for 2.5 s jumps straight to Level 3', () => {
   const c = new FatigueController();
   run(c, 0, 1, () => input('alert'));
-  const ev = c.update(1200, input('drowsy', { closedS: 5.1, reason: 'Eyes closed for 5.1 s' }));
+  // 2.4 s: nothing yet, and no Level 2 question to make the driver open their eyes.
+  assert.deepEqual(levels(c.update(1200, input('alert', { closedS: 2.4 }))), []);
+  const ev = c.update(1300, input('drowsy', { closedS: 2.5, reason: 'Eyes closed for 2.5 s' }));
   assert.deepEqual(levels(ev), [3]);
 });
 
-test('a first sign of drowsiness asks (Level 2); a second one is an emergency', () => {
+test('Level 3 holds while the monitor still says drowsy, then steps down when the eyes open', () => {
   const c = new FatigueController();
-  let r = run(c, 0, 1, () => input('drowsy', { closedS: 2.2 }));
-  assert.deepEqual(levels(r.events), [2]);
-  r = run(c, r.t, 3, () => input('alert'));
-  r = run(c, r.t, 1, () => input('drowsy', { closedS: 2.2 }));
+  let r = run(c, 0, 1, () => input('drowsy', { closedS: 3 }));
   assert.deepEqual(levels(r.events), [3]);
-  // Eyes open again: alarm stops (Level 2), stop advice stays.
+  // Eyes open but the monitor holds "drowsy" for a few seconds.
+  r = run(c, r.t, 3, () => input('drowsy', { closedS: 0 }));
+  assert.equal(c.snapshot().level, 3);
   r = run(c, r.t, 1, () => input('alert'));
   assert.deepEqual(levels(r.events), [2]);
+});
+
+test('strong fatigue signs skip the wait and go to Level 2, never to Level 3', () => {
+  const c = new FatigueController();
+  let r = run(c, 0, 1, () => input('drowsy', { reason: 'Eyes closed 32% of the last 30 s' }));
+  assert.deepEqual(levels(r.events), [2]);
+  assert.ok(r.events.some((e) => e.kind === 'ask'));
+  r = run(c, r.t, 3, () => input('alert'));
+  r = run(c, r.t, 1, () => input('drowsy', { reason: '3 microsleeps detected in 30 s' }));
+  assert.deepEqual(levels(r.events), []);
+  assert.equal(c.snapshot().level, 2);
 });
 
 test('context tightens the limits but never triggers on its own', () => {
@@ -82,11 +94,11 @@ test('context tightens the limits but never triggers on its own', () => {
   const r = run(c, 0, 120, () => input('alert', { night: true, drivingMin: 200 }));
   assert.deepEqual(levels(r.events), []);
   assert.equal(c.snapshot().risk, 'high');
-  // 3 s of closed eyes is an emergency at high risk, not at normal risk.
-  assert.deepEqual(levels(c.update(r.t + 100, input('drowsy', { closedS: 3.1, night: true, drivingMin: 200 }))), [3]);
+  // 1.5 s of closed eyes is an emergency at high risk, not at normal risk.
+  assert.deepEqual(levels(c.update(r.t + 100, input('alert', { closedS: 1.6, night: true, drivingMin: 200 }))), [3]);
   const calm = new FatigueController();
   run(calm, 0, 1, () => input('alert'));
-  assert.ok(!levels(calm.update(1200, input('drowsy', { closedS: 3.1 }))).includes(3));
+  assert.ok(!levels(calm.update(1200, input('alert', { closedS: 1.6 }))).includes(3));
 });
 
 test('high-risk context shortens the Level 2 wait to 20 s', () => {
@@ -99,7 +111,7 @@ test('high-risk context shortens the Level 2 wait to 20 s', () => {
 
 test('"no" snoozes the check-in, but Level 3 can still fire', () => {
   const c = new FatigueController();
-  let r = run(c, 0, 1, () => input('drowsy', { closedS: 2.2 }));
+  let r = run(c, 0, 1, () => input('drowsy'));
   assert.equal(c.snapshot().question, 'pending');
   const ev = c.answer(false, r.t);
   assert.deepEqual(levels(ev), [1]);
@@ -109,13 +121,17 @@ test('"no" snoozes the check-in, but Level 3 can still fire', () => {
   r = run(c, r.t, 120, () => input('tired'));
   assert.equal(c.snapshot().level, 1);
   assert.ok(!r.events.some((e) => e.kind === 'ask'));
-  // Eyes shut: still an emergency.
-  assert.deepEqual(levels(c.update(r.t + 100, input('drowsy', { closedS: 5.5 }))), [3]);
+  // Strong signs while snoozed stay at Level 1 (no question)...
+  r = run(c, r.t, 1, () => input('drowsy'));
+  assert.equal(c.snapshot().level, 1);
+  assert.ok(!r.events.some((e) => e.kind === 'ask'));
+  // ...but eyes shut is still an emergency.
+  assert.deepEqual(levels(c.update(r.t + 100, input('drowsy', { closedS: 2.6 }))), [3]);
 });
 
 test('"yes" is remembered and not asked again in the same episode', () => {
   const c = new FatigueController();
-  const r = run(c, 0, 1, () => input('drowsy', { closedS: 2.2 }));
+  const r = run(c, 0, 1, () => input('drowsy'));
   c.answer(true, r.t);
   assert.equal(c.snapshot().question, 'accepted');
   c.force(1, r.t);
@@ -124,7 +140,7 @@ test('"yes" is remembered and not asked again in the same episode', () => {
 
 test('unanswered questions time out', () => {
   const c = new FatigueController();
-  const r = run(c, 0, 1, () => input('drowsy', { closedS: 2.2 }));
+  const r = run(c, 0, 1, () => input('drowsy'));
   const later = run(c, r.t, ANSWER_TIMEOUT_S + 1, () => input('tired'));
   assert.ok(later.events.some((e) => e.kind === 'no-answer'));
   assert.equal(c.snapshot().question, 'unanswered');
